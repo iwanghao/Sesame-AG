@@ -70,7 +70,7 @@ object LsposedServiceManager {
                     Log.record(TAG, "Another Xposed service tried to connect: $frameworkName. Ignoring.")
                     return
                 }
-                Log.record(TAG, "Framework service connected: $frameworkName v$frameworkVersion")
+                Log.record(TAG, "LSPosed  service connected: $frameworkName v$frameworkVersion")
                 updateState(ConnectionState.Connected(boundService))
                 refreshScope()
             }
@@ -101,10 +101,6 @@ object LsposedServiceManager {
     }
 
     fun refreshScope(): Set<String> {
-        if (!isSupportedLsposedService()) {
-            _scopePackages.set(emptySet())
-            return emptySet()
-        }
         val activeService = service ?: run {
             _scopePackages.set(emptySet())
             return emptySet()
@@ -119,9 +115,6 @@ object LsposedServiceManager {
     }
 
     fun hasTargetScope(packageName: String = General.PACKAGE_NAME): Boolean {
-        if (!isSupportedLsposedService()) {
-            return false
-        }
         val scope = scopePackages.ifEmpty { refreshScope() }
         return packageName in scope
     }
@@ -133,15 +126,6 @@ object LsposedServiceManager {
         }
         if (frameworkStatus.apiVersion < 101) {
             onFinished(ScopeRequestResult(false, message = "Unsupported libxposed API: ${frameworkStatus.apiVersion}"))
-            return false
-        }
-        if (!frameworkStatus.isSupportedLsposed) {
-            onFinished(
-                ScopeRequestResult(
-                    false,
-                    message = "Only official LSPosed is supported; current framework: ${frameworkStatus.frameworkName}"
-                )
-            )
             return false
         }
         val activeService = service ?: run {
