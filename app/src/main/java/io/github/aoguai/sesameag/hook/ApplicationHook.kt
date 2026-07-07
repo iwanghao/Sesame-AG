@@ -137,12 +137,6 @@ class ApplicationHook {
         finalProcessName = processName
         val frameworkInfo = resolveCurrentFrameworkInfo(activeLoader)
         val framework = frameworkInfo.displayName
-        if (frameworkInfo.category == ModuleStatus.FrameworkCategory.PATCH_EMBEDDED) {
-            remotePreferences = null
-            ModuleStatusReporter.updateNow(framework = framework, packageName = packageName, reason = "embedded_patch_blocked")
-            record(TAG, "⛔ 检测到 $framework 内置打包/补丁注入，停止安装 Hook")
-            return
-        }
 
         // 1. 初始化配置读取
         remotePreferences = loadRemotePreferences(framework)

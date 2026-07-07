@@ -50,6 +50,7 @@ object ModuleStatus {
             if (category != FrameworkCategory.UNKNOWN) {
                 return FrameworkInfo(normalizedOfficialName!!, category)
             }
+            return FrameworkInfo(normalizedOfficialName!!, FrameworkCategory.LSPOSED)
         }
         if (classLoader == null) {
             return FrameworkInfo(UNKNOWN_FRAMEWORK, FrameworkCategory.UNKNOWN)
@@ -73,16 +74,13 @@ object ModuleStatus {
 
     fun detectFrameworkInfo(classLoader: ClassLoader): FrameworkInfo {
         return when {
-            // 1. 优先检测 LSPatch / NPatch (因为它们通过修改 APK 实现，特征较特殊)
             isLSPatch(classLoader) -> FrameworkInfo("LSPatch", FrameworkCategory.PATCH_EMBEDDED)
             isNPatch(classLoader) -> FrameworkInfo("NPatch", FrameworkCategory.PATCH_EMBEDDED)
 
-            // 2. 检测标准框架
             checkClass(classLoader, "de.robv.android.xposed.XposedInit") -> FrameworkInfo("LSPosed", FrameworkCategory.LSPOSED)
             checkClass(classLoader, "org.meowcat.edxposed.manager") -> FrameworkInfo("EdXposed", FrameworkCategory.LEGACY_XPOSED)
             checkClass(classLoader, "de.robv.android.xposed.XposedBridge") -> FrameworkInfo("Xposed", FrameworkCategory.LEGACY_XPOSED)
 
-            // 3. 兜底：虽然被 Hook 了但无法识别框架
             else -> FrameworkInfo(UNKNOWN_FRAMEWORK, FrameworkCategory.UNKNOWN)
         }
     }
@@ -97,9 +95,7 @@ object ModuleStatus {
     }
 
     fun isSupportedLsposedFramework(frameworkName: String?, apiVersion: Int): Boolean {
-        return apiVersion >= 101 &&
-            frameworkName?.trim() == "LSPosed" &&
-            classifyFrameworkName(frameworkName) == FrameworkCategory.LSPOSED
+        return apiVersion >= 101
     }
 
     // --- 内部检测逻辑 ---

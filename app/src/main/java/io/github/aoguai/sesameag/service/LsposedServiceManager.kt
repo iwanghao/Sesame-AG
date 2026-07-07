@@ -47,9 +47,9 @@ object LsposedServiceManager {
         )
     }
 
-    fun isSupportedLsposedService(): Boolean {
+    fun isSupportedService(): Boolean {
         val frameworkStatus = connectedFrameworkStatus() ?: return false
-        return frameworkStatus.isSupportedLsposed
+        return frameworkStatus.isSupported
     }
 
     /** 状态监听器列表 */
@@ -189,6 +189,6 @@ data class ConnectedFrameworkStatus(
     val apiVersion: Int,
     val category: ModuleStatus.FrameworkCategory
 ) {
-    val isSupportedLsposed: Boolean
+    val isSupported: Boolean
         get() = ModuleStatus.isSupportedLsposedFramework(frameworkName, apiVersion)
 }
