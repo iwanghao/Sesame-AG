@@ -210,19 +210,18 @@ object ApplicationHookConstants {
             lastOfflineEnterReasonDetail = detail
         }
 
-        val autoExitDelayMs = 20_000L
-        offlineUntilMs = now + autoExitDelayMs
+        offlineUntilMs = if (cooldownMs > 0) (now + cooldownMs) else 0L
 
         record(
             TAG,
-            "enterOffline: type=${if (wasOffline) OfflineEventType.REFRESH else OfflineEventType.ENTER} cooldownMs=$autoExitDelayMs untilMs=$offlineUntilMs reason=${reason ?: "null"} detail=${detail ?: "null"}"
+            "enterOffline: type=${if (wasOffline) OfflineEventType.REFRESH else OfflineEventType.ENTER} cooldownMs=$cooldownMs untilMs=$offlineUntilMs reason=${reason ?: "null"} detail=${detail ?: "null"}"
         )
 
         addOfflineEvent(
             OfflineEvent(
                 type = if (wasOffline) OfflineEventType.REFRESH else OfflineEventType.ENTER,
                 atMs = now,
-                cooldownMs = autoExitDelayMs,
+                cooldownMs = cooldownMs,
                 untilMs = offlineUntilMs,
                 reason = reason,
                 detail = detail
@@ -236,6 +235,7 @@ object ApplicationHookConstants {
                 runningMainTask.stopTask()
             }
             stopAllTask()
+            // 离线/风控发生时实时通知用户（含滑块验证 auth_like），补齐“风控无感知”缺口。
             if (BaseModel.errNotify.value == true) {
                 val title = when (reason) {
                     "auth_like" -> "检测到风控/验证，已暂停"
@@ -245,11 +245,10 @@ object ApplicationHookConstants {
                 runCatching {
                     io.github.aoguai.sesameag.util.Notify.sendAlert(
                         title,
-                        detail?.takeIf { it.isNotBlank() } ?: "20秒后将自动解除离线模式"
+                        detail?.takeIf { it.isNotBlank() } ?: "请打开支付宝完成验证或查看错误日志"
                     )
                 }
             }
-            scheduleOfflineAutoExit(autoExitDelayMs)
         }
 
         AccountSessionCoordinator.refreshWorkflowState(
@@ -338,21 +337,7 @@ object ApplicationHookConstants {
         )
     }
 
-    private const val ENABLE_OFFLINE_AUTO_EXIT = true
-
-    @Volatile
-    private var offlineAutoExitJob: Job? = null
-
-    private fun scheduleOfflineAutoExit(delayMs: Long) {
-        offlineAutoExitJob?.cancel()
-        offlineAutoExitJob = GlobalThreadPools.execute(CoroutineName("OfflineAutoExit")) {
-            delay(delayMs)
-            if (offline) {
-                record(TAG, "offline auto exit triggered after ${delayMs}ms")
-                exitOfflineInternal(OfflineEventType.AUTO_EXIT)
-            }
-        }
-    }
+    private const val ENABLE_OFFLINE_AUTO_EXIT = false
 
     @JvmStatic
     fun shouldBlockRpc(): Boolean {
