@@ -1,13 +1,9 @@
 package io.github.aoguai.sesameag.hook
 
-import io.github.aoguai.sesameag.hook.keepalive.PersistentReconcileMode
-import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
 import io.github.aoguai.sesameag.model.BaseModel
 import io.github.aoguai.sesameag.task.ModelTask.Companion.stopAllTask
-import io.github.aoguai.sesameag.util.DataStore
-import io.github.aoguai.sesameag.util.Log.record
-import io.github.aoguai.sesameag.util.Notify.updateRunningStatus
 import io.github.aoguai.sesameag.util.GlobalThreadPools
+import io.github.aoguai.sesameag.util.Log.record
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -347,57 +343,13 @@ object ApplicationHookConstants {
     @Volatile
     private var offlineAutoExitJob: Job? = null
 
-    @Volatile
-    @JvmStatic
-    var resumingAfterOfflineAutoExit: Boolean = false
-        private set
-
-    @JvmStatic
-    fun consumeOfflineAutoExitResume(): Boolean {
-        if (!resumingAfterOfflineAutoExit) return false
-        resumingAfterOfflineAutoExit = false
-        return true
-    }
-
     private fun scheduleOfflineAutoExit(delayMs: Long) {
         offlineAutoExitJob?.cancel()
         offlineAutoExitJob = GlobalThreadPools.execute(CoroutineName("OfflineAutoExit")) {
             delay(delayMs)
             if (offline) {
-                val exitReason = offlineReason
                 record(TAG, "offline auto exit triggered after ${delayMs}ms")
                 exitOfflineInternal(OfflineEventType.AUTO_EXIT)
-
-                resumingAfterOfflineAutoExit = true
-
-                ApplicationHook.lastExecTime = 0
-                ApplicationHook.mainTask?.let { mt ->
-                    if (mt.isRunning) {
-                        record(TAG, "🔄 离线自动退出：取消当前主任务以便立即恢复执行")
-                        mt.stopTask()
-                    }
-                }
-                stopAllTask()
-                clearPendingTriggers("offline_auto_exit")
-
-                val triggerReason = "offline_auto_exit:${exitReason ?: "unknown"}"
-                ApplicationHookCore.requestExecution(
-                    TriggerInfo(
-                        type = TriggerType.ON_RESUME,
-                        priority = TriggerPriority.HIGH,
-                        reason = triggerReason,
-                        dedupeKey = "offline_auto_exit",
-                        ownerUserId = AccountSessionCoordinator.currentUserId(),
-                        sessionEpoch = AccountSessionCoordinator.currentSessionEpoch()
-                    )
-                )
-
-                ApplicationHook.appContext?.let { context ->
-                    UnifiedScheduler.reconcilePersistentSchedules(
-                        context,
-                        mode = PersistentReconcileMode.FIRE_ALARM_DUE
-                    )
-                }
             }
         }
     }

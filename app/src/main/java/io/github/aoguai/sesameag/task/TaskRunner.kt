@@ -57,8 +57,6 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         private const val DEFAULT_MAX_CONCURRENCY = 1
 
         private val TIMEOUT_WHITELIST = setOf("蚂蚁森林", "蚂蚁庄园", "运动")
-
-        private val runCompletedBatchIndices = java.util.concurrent.CopyOnWriteArraySet<Int>()
     }
 
     private val taskList: List<ModelTask> = allModels.filterIsInstance<ModelTask>()
@@ -106,7 +104,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
         // 【互斥检查】如果手动任务流正在运行，则跳过本次自动执行
         if (ManualTask.isManualRunning) {
-            Log.record(TAG, "⏸ 检测到手动庄园任务流正在运行中，跳过本次自动任务调度")
+            Log.record(TAG, "⏸ 检测到“手动庄园任务流”正在运行中，跳过本次自动任务调度")
             return@coroutineScope
         }
 
@@ -118,11 +116,6 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         if (isFirst) {
             ApplicationHook.updateDay()
             resetCounters()
-            if (!ApplicationHookConstants.consumeOfflineAutoExitResume()) {
-                runCompletedBatchIndices.clear()
-            } else {
-                Log.record(TAG, "🔄 离线自动退出恢复执行，跳过已完成批次: $runCompletedBatchIndices")
-            }
         }
 
         try {
@@ -181,10 +174,6 @@ class CoroutineTaskRunner(allModels: List<Model>) {
                 awaitLongRunningJobs()
             }
             if (isRunSessionCurrent()) {
-                if (runCompletedBatchIndices.size >= taskList.count { it.isEnable() } && runCompletedBatchIndices.isNotEmpty()) {
-                    runCompletedBatchIndices.clear()
-                    Log.record(TAG, "🧹 全量执行完成，清除已完成批次记录")
-                }
                 scheduleNext()
             } else {
                 Log.record(TAG, "⏭ 会话已切换，跳过下次调度 owner=$runSessionOwnerUserId session=$runSessionEpoch")
@@ -235,11 +224,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
                 Log.record(TAG, "⏸ [第 $round/$totalRounds 轮] 检测到离线模式，停止后续批次")
                 break
             }
-            val batchJobs = scheduleTaskBatch(round, totalRounds, batchIndex + 1, taskBatches.size, batchTasks)
-            if (batchJobs.isNotEmpty()) {
-                runCompletedBatchIndices.add(batchIndex + 1)
-            }
-            deferreds += batchJobs
+            deferreds += scheduleTaskBatch(round, totalRounds, batchIndex + 1, taskBatches.size, batchTasks)
         }
         deferreds.joinAll()
 
@@ -265,11 +250,6 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         if (ApplicationHookConstants.isOffline()) {
             skippedCount.addAndGet(tasks.size)
             Log.record(TAG, "⏸ [第 $round/$totalRounds 轮][批次 $batchIndex/$totalBatches] 检测到离线模式，跳过批次")
-            return emptyList()
-        }
-
-        if (runCompletedBatchIndices.contains(batchIndex)) {
-            Log.record(TAG, "⏭ [第 $round/$totalRounds 轮][批次 $batchIndex/$totalBatches] 已在之前的执行周期中完成，跳过: ${tasks.joinToString("、") { it.getName().orEmpty() }}")
             return emptyList()
         }
 
