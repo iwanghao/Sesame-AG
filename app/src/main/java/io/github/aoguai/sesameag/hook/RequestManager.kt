@@ -118,27 +118,17 @@ object RequestManager {
      */
     private fun handleFailure(method: String, reason: String) {
         val currentCount = errorCount.incrementAndGet()
-        // 假设 BaseModel 有个方法获取这个配置，或者直接用常量
         val maxCount = BaseModel.setMaxErrorCount.value ?: 8
 
         Log.error(TAG, "RPC 失败 ($currentCount/$maxCount) | Method: $method | Reason: $reason")
 
-        // 触发兜底阈值
         if (currentCount >= maxCount) {
-            Log.record(TAG, "🔴 连续失败次数达到阈值，触发熔断兜底机制！")
-            // 1. 设置离线状态，停止后续任务
-            ApplicationHookConstants.setOffline(
-                true,
-                "rpc_error_threshold",
-                "method=$method current=$currentCount threshold=$maxCount reason=$reason"
-            )
-            // 2. 发送通知 (根据用户配置)
+            Log.record(TAG, "🔴 连续失败次数达到阈值，已禁用离线模式，继续重试 | method=$method current=$currentCount threshold=$maxCount")
+            Notify.updateRunningStatus("网络异常，持续重试中...")
             if (BaseModel.errNotify.value == true) {
-                val msg = "${TimeUtil.getTimeStr()} | 网络异常次数超过阈值[$maxCount]"
-                Notify.sendAlert(msg, "RPC 连续失败，脚本已暂停")
+                val msg = "${TimeUtil.getTimeStr()} | 网络异常次数超过阈值[$maxCount]，已禁用离线模式，继续重试"
+                Notify.sendAlert(msg, reason)
             }
-            // 3. 立即尝试一次恢复
-            handleOfflineRecovery()
         }
     }
 
