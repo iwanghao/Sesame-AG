@@ -34,6 +34,7 @@ class BaseModel : Model() {
         val modelFields = ModelFields()
         modelFields.addField(stayAwake) //是否保持唤醒状态
         modelFields.addField(manualTriggerAutoSchedule) //手动触发是否自动安排下次执行
+        modelFields.addField(offlineExecution) //离线执行开关
         modelFields.addField(checkInterval) //执行间隔时间
         modelFields.addField(offlineCooldown) //离线冷却时间
         modelFields.addField(taskExecutionRounds) //轮数
@@ -109,6 +110,13 @@ class BaseModel : Model() {
             24 * 60,
             60000
         ).withDesc("触发网络异常或离线熔断后的冷却时长；填 0 时跟随执行间隔，并受最小保护时间限制。")
+
+        /**
+         * 离线执行开关
+         */
+        val offlineExecution: BooleanModelField = BooleanModelField("offlineExecution", "离线执行", false).withDesc(
+            "开启后，进入离线模式时不会停止正在执行的任务，任务将继续运行。关闭后，进入离线模式即停止任务执行。"
+        )
 
         /**
          * 任务执行轮数配置

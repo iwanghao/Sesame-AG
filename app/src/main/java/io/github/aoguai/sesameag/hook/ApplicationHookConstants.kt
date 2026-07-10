@@ -60,7 +60,7 @@ object ApplicationHookConstants {
         private set
 
     @JvmStatic
-    fun isOffline(): Boolean = offline
+    fun isOffline(): Boolean = offline && BaseModel.offlineExecution.value != true
 
     @Volatile
     var offlineUntilMs: Long = 0L
@@ -229,13 +229,15 @@ object ApplicationHookConstants {
         )
 
         if (!wasOffline) {
-            val runningMainTask = ApplicationHook.mainTask
-            if (runningMainTask?.isRunning == true) {
-                record(TAG, "offline entered, stop current mainTask to pause workflow")
-                runningMainTask.stopTask()
+            if (isOffline()) {
+                val runningMainTask = ApplicationHook.mainTask
+                if (runningMainTask?.isRunning == true) {
+                    record(TAG, "offline entered, stop current mainTask to pause workflow")
+                    runningMainTask.stopTask()
+                }
+                stopAllTask()
             }
-            stopAllTask()
-            // 离线/风控发生时实时通知用户（含滑块验证 auth_like），补齐“风控无感知”缺口。
+            // 离线/风控发生时实时通知用户（含滑块验证 auth_like），补齐"风控无感知"缺口。
             if (BaseModel.errNotify.value == true) {
                 val title = when (reason) {
                     "auth_like" -> "检测到风控/验证，已暂停"
@@ -342,6 +344,8 @@ object ApplicationHookConstants {
     @JvmStatic
     fun shouldBlockRpc(): Boolean {
         if (!offline) return false
+
+        if (BaseModel.offlineExecution.value == true) return false
 
         if (!ENABLE_OFFLINE_AUTO_EXIT) {
             return true
