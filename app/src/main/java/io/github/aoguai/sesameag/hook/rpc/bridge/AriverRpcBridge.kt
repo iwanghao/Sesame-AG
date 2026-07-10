@@ -203,8 +203,11 @@ class AriverRpcBridge : RpcBridge {
         }
 
         if (!wasOffline) {
-            // 已禁用离线模式：永不进入离线
-            Log.record(TAG, "检测到 auth_like 错误但已禁用离线 | $offlineDetail")
+            io.github.aoguai.sesameag.hook.ApplicationHookConstants.enterOffline(
+                cooldownMs,
+                "auth_like",
+                offlineDetail
+            )
         }
 
         val shouldTryRelogin =
@@ -522,13 +525,16 @@ class AriverRpcBridge : RpcBridge {
                             if (!io.github.aoguai.sesameag.hook.ApplicationHookConstants.offline) {
                                 var enteredOffline = false
                                 if (currentErrorCount > setMaxErrorCount) {
-                                    // 已禁用离线模式：永不进入离线
-                                    Log.record(TAG, "网络错误超过阈值但已禁用离线 | current=$currentErrorCount threshold=$setMaxErrorCount")
-                                    enteredOffline = false
-                                    Notify.updateRunningStatus("网络连接异常，继续重试中...")
+                                    io.github.aoguai.sesameag.hook.ApplicationHookConstants.enterOffline(
+                                        offlineCooldownMs(),
+                                        "network_error_threshold",
+                                        "current=$currentErrorCount threshold=$setMaxErrorCount"
+                                    )
+                                    enteredOffline = true
+                                    Notify.updateRunningStatus("网络连接异常，已进入离线模式")
                                     if (BaseModel.errNotify.value == true) {
                                         Notify.sendAlert(
-                                            "${TimeUtil.getTimeStr()} | 网络异常: 已禁用离线模式，继续重试中",
+                                            "${TimeUtil.getTimeStr()} | 网络异常次数超过阈值[$setMaxErrorCount]",
                                             response
                                         )
                                     }

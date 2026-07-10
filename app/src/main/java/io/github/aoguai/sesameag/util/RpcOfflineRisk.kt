@@ -68,8 +68,14 @@ object RpcOfflineRisk {
         }
         if (!ApplicationHookConstants.isOffline()) {
             val detail = buildDetail(source, code, message)
-            // 已禁用离线模式：永远不进入离线
-            Log.error(TAG, "检测到风控/验证拦截但已禁用离线 | $detail")
+            // 风控/验证(含滑块)命中时显式落错误日志，保留触发响应的原始线索，
+            // 避免仅静默进入离线模式而在日志中查不到任何风控痕迹。
+            Log.error(TAG, "命中风控/验证拦截，进入离线 | $detail")
+            ApplicationHookConstants.enterOffline(
+                ApplicationHookConstants.getOfflineCooldownMs(),
+                "auth_like",
+                detail
+            )
         }
         return true
     }

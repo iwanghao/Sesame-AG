@@ -196,10 +196,6 @@ object ApplicationHookConstants {
 
     @JvmStatic
     fun enterOffline(cooldownMs: Long, reason: String? = null, detail: String? = null) {
-        // 已禁用离线模式：永远不进入离线
-        record(TAG, "enterOffline skipped (disabled): cooldownMs=$cooldownMs reason=${reason ?: "null"} detail=${detail ?: "null"}")
-        return
-
         val wasOffline = offline
         val now = nowProvider()
 
@@ -345,7 +341,19 @@ object ApplicationHookConstants {
 
     @JvmStatic
     fun shouldBlockRpc(): Boolean {
-        // 已禁用离线模式：永远不拦截 RPC
+        if (!offline) return false
+
+        if (!ENABLE_OFFLINE_AUTO_EXIT) {
+            return true
+        }
+
+        val untilMs = offlineUntilMs
+        if (untilMs <= 0L) return true
+
+        val now = nowProvider()
+        if (now < untilMs) return true
+
+        exitOfflineInternal(OfflineEventType.AUTO_EXIT)
         return false
     }
 
