@@ -118,7 +118,7 @@ class BaseModel : Model() {
         /**
          * 离线执行开关
          */
-        val offlineExecution: IntegerModelField = IntegerModelField("offlineExecution", "离线执行", false).withDesc(
+        val offlineExecution: BooleanModelField = BooleanModelField("offlineExecution", "离线执行", false).withDesc(
             "开启后，进入离线模式时不会停止正在执行的任务，任务将继续运行。关闭后，进入离线模式即停止任务执行。"
         )
 
