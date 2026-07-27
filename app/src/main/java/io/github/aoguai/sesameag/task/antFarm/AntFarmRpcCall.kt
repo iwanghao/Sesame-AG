@@ -17,6 +17,12 @@ object AntFarmRpcCall {
     private const val GAME_CENTER_VERSION = "10.8.20.8000"
     private const val KITCHEN_TASK_SOURCE = "antfarmzuofanrw"
 
+    enum class FamilyInviteVisitOutcome {
+        SUBMITTED,
+        ALREADY_COMPLETED_CONFIRMED,
+        RETRY_LATER,
+    }
+
     /**
      * 进入庄园
      *
@@ -1081,6 +1087,37 @@ object AntFarmRpcCall {
         )
 
     /**
+     * 查询“雇佣小鸡拿饲料”任务限定的服务端候选。
+     * 该任务的候选和普通好友雇佣并非同一契约，不能复用 friendFarmId/hireAnimalId 请求。
+     */
+    @JvmStatic
+    fun hireAnimalTaskList(): String {
+        val args = JSONObject()
+        args.put("requestType", "NORMAL")
+        args.put("sceneCode", "ANTFARMWORKSHOP")
+        args.put("source", "H5")
+        return requestString("com.alipay.antfarm.hireAnimalTaskList", JSONArray().put(args).toString())
+    }
+
+    /**
+     * 雇佣“雇佣小鸡拿饲料”任务下发的候选。
+     * 最新闭环使用 friendUserId 和任务标识字段，不携带普通好友雇佣的 farmId/animalId/version。
+     */
+    @JvmStatic
+    fun hireAnimalFromTaskList(friendUserId: String): String {
+        val args = JSONObject()
+        args.put("friendUserId", friendUserId)
+        args.put("hireActionType", "HIRE_IN_FRIEND_FARM")
+        args.put("isDoubleReward", true)
+        args.put("isFromHireTaskList", true)
+        args.put("requestType", "NORMAL")
+        args.put("sceneCode", "ANTFARMWORKSHOP")
+        args.put("sendCardChat", true)
+        args.put("source", "H5")
+        return requestString("com.alipay.antfarm.hireAnimal", JSONArray().put(args).toString())
+    }
+
+    /**
      * 雇佣NPC小鸡（支持传入source）
      *
      * @param animalId 动物ID
@@ -1502,6 +1539,46 @@ object AntFarmRpcCall {
             "[{\"bizType\":\"FAMILY_SHARE\",\"receiverUserId\":" + receiverUserId +
                 ",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}]"
         return requestString("com.alipay.antfarm.inviteFriendVisitFamily", args)
+    }
+
+    /**
+     * FAMILY48 是服务端声明“任务已完成”的业务终态，不能把 success=false 静默当作成功。
+     * 仅在随后的家庭任务快照不再显示 FAMILY_SHARE TODO 时，才允许调用方写入当日标记。
+     */
+    @JvmStatic
+    fun confirmFamilyInviteVisitOutcome(response: JSONObject): FamilyInviteVisitOutcome {
+        if (response.optString("memo") == "SUCCESS") {
+            return FamilyInviteVisitOutcome.SUBMITTED
+        }
+        if (response.optString("resultCode") != "FAMILY48") {
+            return FamilyInviteVisitOutcome.RETRY_LATER
+        }
+
+        val taskSnapshot = JSONObject(listFamilyTask())
+        if (!isFamilyTaskSnapshotSuccess(taskSnapshot) || hasPendingFamilyShareTask(taskSnapshot)) {
+            return FamilyInviteVisitOutcome.RETRY_LATER
+        }
+        return FamilyInviteVisitOutcome.ALREADY_COMPLETED_CONFIRMED
+    }
+
+    private fun isFamilyTaskSnapshotSuccess(response: JSONObject): Boolean =
+        response.optBoolean("success") ||
+            response.optString("memo") == "SUCCESS" ||
+            response.optString("resultCode") == "SUCCESS"
+
+    private fun hasPendingFamilyShareTask(response: JSONObject): Boolean {
+        val familyTasks = response.optJSONArray("familyTasks") ?: return true
+        for (index in 0 until familyTasks.length()) {
+            val task = familyTasks.optJSONObject(index) ?: continue
+            val isFamilyShare =
+                task.optString("bizKey") == "FAMILY_SHARE" ||
+                    task.optString("taskId") == "FAMILY_SHARE" ||
+                    task.optString("taskType") == "FAMILY_SHARE"
+            if (isFamilyShare && task.optString("taskStatus") == "TODO") {
+                return true
+            }
+        }
+        return false
     }
 
     @JvmStatic
