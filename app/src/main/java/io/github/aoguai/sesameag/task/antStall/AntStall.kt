@@ -540,11 +540,13 @@ class AntStall : ModelTask() {
                     Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE) &&
                         !stallTasksDoneInvalidatedThisRun
                 if (!taskHandledToday) {
-                    taskList(allowMarkDone = false)
+                    val firstTaskRefreshMarkedDone = taskList(allowMarkDone = true)
                     tc.countDebug("自动任务第一次")
-                    GlobalThreadPools.sleepCompat(500)
-                    taskList(allowMarkDone = false)
-                    tc.countDebug("自动任务第二次")
+                    if (!firstTaskRefreshMarkedDone) {
+                        GlobalThreadPools.sleepCompat(500)
+                        taskList(allowMarkDone = true)
+                        tc.countDebug("自动任务第二次")
+                    }
                 }
             }
 
@@ -1316,17 +1318,19 @@ class AntStall : ModelTask() {
     private fun taskList(
         skipIfHandledToday: Boolean = true,
         allowMarkDone: Boolean = true,
-    ) {
+    ): Boolean {
         try {
             val adapter = StallTaskFlowAdapter(skipIfHandledToday)
             val result = TaskFlowEngine(adapter, roundSleepMs = 500L).run()
             if (allowMarkDone && !result.stopped && adapter.canMarkTasksDone()) {
                 Status.setFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)
                 stallTasksDoneInvalidatedThisRun = false
+                return true
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "taskList err:", t)
         }
+        return false
     }
 
     private fun buildStallTaskItems(response: JSONObject): List<TaskFlowItem> {
@@ -1384,7 +1388,6 @@ class AntStall : ModelTask() {
                 ),
             )
         }
-        items.filter { it.type == STALL_ELEME_VISIT_TASK_TYPE }.forEach(::releaseStallTaskBlacklist)
         return items
     }
 
@@ -1715,13 +1718,11 @@ class AntStall : ModelTask() {
             } ?: return null
         return when {
             isStallTerminalStatus(refreshedItem.status) -> {
-                releaseStallTaskBlacklist(refreshedItem)
                 Log.stall("新村浏览任务⚠️[${item.title}] XLight未推进事件，但刷新后已处于终态")
                 TaskFlowActionResult.success()
             }
 
             isStallRewardReadyStatus(refreshedItem.status) -> {
-                releaseStallTaskBlacklist(refreshedItem)
                 Log.stall("新村浏览任务⚠️[${item.title}] XLight未推进事件，但刷新后奖励已可领取")
                 TaskFlowActionResult.success(refreshAfterAction = true)
             }
@@ -1729,16 +1730,6 @@ class AntStall : ModelTask() {
             else -> {
                 null
             }
-        }
-    }
-
-    private fun releaseStallTaskBlacklist(item: TaskFlowItem) {
-        if (item.id.isNotBlank()) {
-            TaskBlacklist.removeFromBlacklist(STALL_TASK_BLACKLIST_MODULE, item.id, item.title)
-            TaskBlacklist.removeFromBlacklist(STALL_TASK_BLACKLIST_MODULE, item.id)
-        }
-        if (item.title.isNotBlank()) {
-            TaskBlacklist.removeFromBlacklist(STALL_TASK_BLACKLIST_MODULE, item.title)
         }
     }
 

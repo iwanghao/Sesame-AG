@@ -46,7 +46,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- 内部状态定义 ---
     sealed class ModuleStatus {
         enum class UnsupportedReason {
-            API_TOO_LOW
+            API_TOO_LOW,
+            NON_LSPOSED
         }
 
         data object Loading : ModuleStatus()
@@ -58,9 +59,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val reason: UnsupportedReason
         ) : ModuleStatus()
         data class Activated(
-            val frameworkName: String,
-            val frameworkVersion: String,
-            val apiVersion: Int
+            val frameworkName: String,     // 仅支持维护的框架名称 (LSPosed)
+            val frameworkVersion: String,  // 版本号
+            val apiVersion: Int            // API版本
         ) : ModuleStatus()
     }
 
@@ -161,7 +162,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        _moduleStatus.value = if (frameworkStatus.isSupported) {
+        _moduleStatus.value = if (frameworkStatus.isSupportedLsposed) {
             ModuleStatus.Activated(
                 frameworkName = frameworkStatus.frameworkName,
                 frameworkVersion = frameworkStatus.frameworkVersion,
@@ -172,7 +173,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 frameworkName = frameworkStatus.frameworkName,
                 frameworkVersion = frameworkStatus.frameworkVersion,
                 apiVersion = frameworkStatus.apiVersion,
-                reason = ModuleStatus.UnsupportedReason.API_TOO_LOW
+                reason = if (!frameworkStatus.hasRequiredApi) {
+                    ModuleStatus.UnsupportedReason.API_TOO_LOW
+                } else {
+                    ModuleStatus.UnsupportedReason.NON_LSPOSED
+                }
             )
         }
     }

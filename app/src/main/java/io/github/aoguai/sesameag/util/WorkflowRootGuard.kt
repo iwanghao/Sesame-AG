@@ -8,7 +8,7 @@ import kotlinx.coroutines.sync.withLock
 /**
  * 统一工作流执行权限门禁。
  *
- * 兼容旧 API 命名：`hasRoot/hasGrantedRoot` 现在表示“当前进程已被 Hook 注入或实时 Root 可用”。
+ * `hasRoot/hasGrantedRoot` 表示“当前进程已由受支持的 libxposed 运行时注入或实时 Root 可用”。
  * 配置文件可以存在，但未通过此门禁时不允许进入运行态。
  */
 object WorkflowRootGuard {
@@ -26,9 +26,7 @@ object WorkflowRootGuard {
     @Volatile
     private var lastLoggedState: Boolean? = null
 
-    fun hasGrantedRoot(): Boolean {
-        return resolveHookAccessSource() != null || lastGranted
-    }
+    fun hasGrantedRoot(): Boolean = resolveHookAccessSource() != null || lastGranted
 
     suspend fun hasRoot(forceRefresh: Boolean = false, reason: String? = null): Boolean {
         val now = System.currentTimeMillis()
@@ -77,18 +75,22 @@ object WorkflowRootGuard {
     }
 
     private suspend fun resolveRootAvailability(nowMs: Long): Boolean {
-        val classLoader = ApplicationHook.classLoader
-        if (classLoader != null) {
+        if (ApplicationHook.classLoader != null) {
             val frameworkInfo = try {
-                ApplicationHook.resolveCurrentFrameworkInfo(classLoader)
+                ApplicationHook.resolveCurrentFrameworkInfo()
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "当前进程框架识别失败", t)
                 null
             }
             if (frameworkInfo != null) {
                 Log.record(TAG, "🧩 当前进程框架识别: ${frameworkInfo.displayName}")
-                Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
-                return true
+                if (ApplicationHook.hasSupportedLibXposedRuntime() &&
+                    frameworkInfo.category == ModuleStatus.FrameworkCategory.LSPOSED
+                ) {
+                    Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
+                    return true
+                }
+                Log.record(TAG, "⚠️ 当前进程框架不在 libxposed API 102 支持范围内，继续进行实时 Root 探测")
             }
         } else {
             Log.record(TAG, "⚠️ 当前进程 classLoader 尚未就绪，继续进行实时 Root 探测")
@@ -105,13 +107,20 @@ object WorkflowRootGuard {
     }
 
     private fun resolveHookAccessSource(): String? {
-        val classLoader = ApplicationHook.classLoader ?: return null
+        ApplicationHook.classLoader ?: return null
         val frameworkInfo = try {
-            ApplicationHook.resolveCurrentFrameworkInfo(classLoader)
+            ApplicationHook.resolveCurrentFrameworkInfo()
         } catch (_: Throwable) {
             return null
         }
-        return frameworkInfo.displayName
+        return frameworkInfo.displayName.takeIf {
+            ApplicationHook.hasSupportedLibXposedRuntime() &&
+                isAllowedHookFramework(frameworkInfo.category)
+        }
+    }
+
+    private fun isAllowedHookFramework(category: ModuleStatus.FrameworkCategory): Boolean {
+        return category == ModuleStatus.FrameworkCategory.LSPOSED
     }
 
     private fun logState(granted: Boolean, reason: String?) {

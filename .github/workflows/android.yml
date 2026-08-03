@@ -10,10 +10,11 @@ env:
   CI: "true"
   JAVA_DISTRIBUTION: "oracle"
   JAVA_VERSION: "17.0.1"
-  ANDROID_API_LEVEL: "36"
-  ANDROID_BUILD_TOOLS: "36.0.0"
-  LOCAL_GRADLE_VERSION: "9.4.0-milestone-3"
-  LOCAL_AGP_VERSION: "9.0.1"
+  ANDROID_API_LEVEL: "37"
+  ANDROID_PLATFORM: "android-37.0"
+  ANDROID_BUILD_TOOLS: "37.0.0"
+  LOCAL_GRADLE_VERSION: "9.5.1"
+  LOCAL_AGP_VERSION: "9.2.1"
   LOCAL_KOTLIN_VERSION: "2.2.10"
   RELEASE_DIR: app/build/outputs/apk/release
   STAGING_DIR: app/build/outputs/apk/all
@@ -68,6 +69,7 @@ jobs:
           grep -Eq '^kotlin = "'"${LOCAL_KOTLIN_VERSION//./\\.}"'"$' gradle/libs.versions.toml
           grep -Eq '^appVersion=.+' gradle.properties
           grep -Eq 'compileSdk = '"${ANDROID_API_LEVEL}"'$' app/build.gradle.kts
+          grep -Eq 'buildToolsVersion = "'"${ANDROID_BUILD_TOOLS//./\\.}"'"$' app/build.gradle.kts
           grep -Eq 'sourceCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
           grep -Eq 'targetCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
 
@@ -271,7 +273,7 @@ jobs:
           set -euo pipefail
           sdkmanager --install \
             "platform-tools" \
-            "platforms;android-${ANDROID_API_LEVEL}" \
+            "platforms;${ANDROID_PLATFORM}" \
             "build-tools;${ANDROID_BUILD_TOOLS}"
           # `yes` will receive SIGPIPE after sdkmanager finishes reading input.
           # Run this pipeline without pipefail so the step reflects sdkmanager's exit code.

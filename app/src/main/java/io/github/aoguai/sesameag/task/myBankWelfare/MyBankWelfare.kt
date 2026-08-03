@@ -35,7 +35,6 @@ import io.github.aoguai.sesameag.task.exchange.ExchangeSafetyRules
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
-import io.github.aoguai.sesameag.util.TaskBlacklist
 import io.github.aoguai.sesameag.util.maps.IdMapManager
 import io.github.aoguai.sesameag.util.maps.MyBankWelfareBenefitMap
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -732,10 +731,10 @@ class MyBankWelfare : ModelTask() {
             val canRetry = result?.optBoolean("canRetry", false) == true
             if (signNotAdmit && !canRetry) {
                 Log.mybank("${BUSINESS_NAME}📅今日签到已处理")
+                setFlagToday(StatusFlags.FLAG_MYBANK_WELFARE_SIGN_DONE)
             } else {
                 Log.mybank("${BUSINESS_NAME}📅签到咨询成功")
             }
-            setFlagToday(StatusFlags.FLAG_MYBANK_WELFARE_SIGN_DONE)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "handleSign err:", t)
         }
@@ -798,6 +797,9 @@ class MyBankWelfare : ModelTask() {
         private val signedUpTaskKeys = LinkedHashSet<String>()
         private val sentTaskKeys = LinkedHashSet<String>()
 
+        override fun isFlowHandledToday(): Boolean =
+            hasFlagToday(StatusFlags.FLAG_MYBANK_WELFARE_TASKS_DONE)
+
         override fun query(): JSONObject {
             val response = MyBankWelfareRpcCall.taskQuery(TASK_CENTER_ID)
             if (response.isBlank()) {
@@ -829,7 +831,6 @@ class MyBankWelfare : ModelTask() {
                     .ifBlank { taskDetail.optString("taskTitle").trim() }
                     .ifBlank { taskDetail.optString("title").trim() }
                     .ifBlank { taskId }
-                releaseTerminalTaskBlacklistIfNeeded(taskId, title, taskDetail.optString("taskProcessStatus"))
                 val current = when {
                     taskDetail.has("periodCurrentCompleteNum") -> taskDetail.optInt("periodCurrentCompleteNum")
                     taskDetail.has("taskCompleteTimes") -> taskDetail.optInt("taskCompleteTimes")
@@ -928,6 +929,7 @@ class MyBankWelfare : ModelTask() {
         }
 
         override fun onAllTasksDone(snapshot: TaskFlowSnapshot) {
+            setFlagToday(StatusFlags.FLAG_MYBANK_WELFARE_TASKS_DONE)
             logInfo("$flowName[任务列表已处理完成：${snapshot.completedTasks}/${snapshot.totalTasks}]")
         }
 
@@ -981,20 +983,6 @@ class MyBankWelfare : ModelTask() {
                 TaskFlowAction.SEND,
                 TaskFlowAction.COMPLETE -> sentTaskKeys.add(taskKey)
                 TaskFlowAction.RECEIVE -> Unit
-            }
-        }
-
-        private fun releaseTerminalTaskBlacklistIfNeeded(taskId: String, title: String, status: String) {
-            val normalizedStatus = status.trim().uppercase(Locale.ROOT)
-            if (normalizedStatus !in setOf("RECEIVE_SUCCESS", "HAS_RECEIVED", "RECEIVED", "DONE", "COMPLETED")) {
-                return
-            }
-            if (taskId.isNotBlank()) {
-                TaskBlacklist.removeFromBlacklist(moduleName, taskId, title)
-                TaskBlacklist.removeFromBlacklist(moduleName, taskId)
-            }
-            if (title.isNotBlank()) {
-                TaskBlacklist.removeFromBlacklist(moduleName, title)
             }
         }
 
