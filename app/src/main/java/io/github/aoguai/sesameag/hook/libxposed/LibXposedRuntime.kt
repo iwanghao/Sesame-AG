@@ -10,7 +10,7 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
 /**
- * Bridges the API 102 module lifecycle to the existing application hook runtime.
+ * Bridges the API 101+ module lifecycle to the existing application hook runtime.
  *
  * The framework attaches [module] before [onModuleLoaded] runs. The adapter therefore only
  * exposes that interface to [ApplicationHook] after the supported runtime has been verified.
@@ -35,9 +35,9 @@ internal class LibXposedRuntime(
             module.log(
                 Log.ERROR,
                 TAG,
-                "Unsupported runtime: $frameworkName API $apiVersion; requires LSPosed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
+                "Unsupported runtime: $frameworkName API $apiVersion; requires libxposed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
             )
-            module.detach()
+            tryDetach(module, apiVersion)
             return
         }
 
@@ -60,7 +60,8 @@ internal class LibXposedRuntime(
 
         val targetProcessName = processName ?: run {
             module.log(Log.ERROR, TAG, "Package callback arrived before module runtime initialization")
-            module.detach()
+            val apiVersion = runCatching { module.apiVersion }.getOrDefault(0)
+            tryDetach(module, apiVersion)
             return
         }
         packageReady = true
@@ -76,7 +77,23 @@ internal class LibXposedRuntime(
             module.log(Log.ERROR, TAG, "Hook failed - ${t.message}", t)
         } finally {
             // One scoped package is enough for this entry; hooks remain active after detaching.
-            module.detach()
+            val apiVersion = runCatching { module.apiVersion }.getOrDefault(0)
+            tryDetach(module, apiVersion)
+        }
+    }
+
+    /**
+     * Safely attempt to detach the module using reflection.
+     * detach() only exists in API 102+, so we use reflection to avoid compile-time errors.
+     */
+    private fun tryDetach(module: XposedModule, apiVersion: Int) {
+        if (apiVersion < 102) {
+            return
+        }
+        runCatching {
+            module.javaClass.getMethod("detach").invoke(module)
+        }.onFailure { t ->
+            module.log(Log.DEBUG, TAG, "Failed to detach module: ${t.message}")
         }
     }
 

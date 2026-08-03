@@ -7,12 +7,12 @@ package io.github.aoguai.sesameag.util
  */
 object ModuleStatus {
     // This object also runs in the standalone settings process, where the compileOnly API jar is absent.
-    const val MIN_SUPPORTED_LIBXPOSED_API = 102
+    const val MIN_SUPPORTED_LIBXPOSED_API = 101
 
     private const val UNKNOWN_FRAMEWORK = "Unknown"
 
     enum class FrameworkCategory {
-        LSPOSED,
+        SUPPORTED,
         UNSUPPORTED,
     }
 
@@ -27,15 +27,15 @@ object ModuleStatus {
     }
 
     fun classifyFrameworkName(frameworkName: String?): FrameworkCategory {
-        return if (frameworkName?.trim() == "LSPosed") {
-            FrameworkCategory.LSPOSED
-        } else {
+        return if (frameworkName?.trim().isNullOrBlank() || frameworkName?.trim() == UNKNOWN_FRAMEWORK) {
             FrameworkCategory.UNSUPPORTED
+        } else {
+            FrameworkCategory.SUPPORTED
         }
     }
 
     fun isSupportedLsposedFramework(frameworkName: String?, apiVersion: Int): Boolean {
         return apiVersion >= MIN_SUPPORTED_LIBXPOSED_API &&
-            classifyFrameworkName(frameworkName) == FrameworkCategory.LSPOSED
+            classifyFrameworkName(frameworkName) == FrameworkCategory.SUPPORTED
     }
 }

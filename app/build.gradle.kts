@@ -211,7 +211,7 @@ dependencies {
     implementation(libs.webkit) // WebView 组件
 
     // 仅编译时依赖 - Xposed 相关
-    compileOnly(libs.libxposed.api) // Xposed API 102 https://github.com/libxposed/api
+    compileOnly(libs.libxposed.api) // Xposed API 101 https://github.com/libxposed/api
     implementation(libs.libxposed.service) // https://github.com/libxposed/service
 
     // 代码生成和工具库

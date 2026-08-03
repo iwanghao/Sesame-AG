@@ -85,12 +85,12 @@ object WorkflowRootGuard {
             if (frameworkInfo != null) {
                 Log.record(TAG, "🧩 当前进程框架识别: ${frameworkInfo.displayName}")
                 if (ApplicationHook.hasSupportedLibXposedRuntime() &&
-                    frameworkInfo.category == ModuleStatus.FrameworkCategory.LSPOSED
+                    isAllowedHookFramework(frameworkInfo.category)
                 ) {
                     Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
                     return true
                 }
-                Log.record(TAG, "⚠️ 当前进程框架不在 libxposed API 102 支持范围内，继续进行实时 Root 探测")
+                Log.record(TAG, "⚠️ 当前进程框架不在 libxposed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API} 支持范围内，继续进行实时 Root 探测")
             }
         } else {
             Log.record(TAG, "⚠️ 当前进程 classLoader 尚未就绪，继续进行实时 Root 探测")
@@ -120,7 +120,7 @@ object WorkflowRootGuard {
     }
 
     private fun isAllowedHookFramework(category: ModuleStatus.FrameworkCategory): Boolean {
-        return category == ModuleStatus.FrameworkCategory.LSPOSED
+        return category == ModuleStatus.FrameworkCategory.SUPPORTED
     }
 
     private fun logState(granted: Boolean, reason: String?) {

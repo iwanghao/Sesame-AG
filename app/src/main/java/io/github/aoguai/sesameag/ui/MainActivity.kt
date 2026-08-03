@@ -554,9 +554,9 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
                 if (result.success) {
-                    ToastUtil.showToast(this, "LSPosed 作用域已更新")
+                    ToastUtil.showToast(this, "Xposed 作用域已更新")
                 } else if (result.message.isNotBlank()) {
-                    ToastUtil.showToast(this, "LSPosed 作用域申请失败: ${result.message}")
+                    ToastUtil.showToast(this, "Xposed 作用域申请失败: ${result.message}")
                 }
                 continuePermissionQueueOrAuto()
             }
@@ -699,8 +699,8 @@ class MainActivity : ComponentActivity() {
                 requirement = PermissionRequirement.LSPOSED_TARGET_SCOPE,
                 status = lsposedScopeStatus(targetInstalled, requesting),
                 policy = PermissionPolicy.AUTO_CRITICAL,
-                title = "LSPosed 目标应用作用域",
-                description = "仅LSPosed 支持自动申请与校验作用域；首次使用请把目标应用加入作用域后重新打开目标应用或返回本页复查",
+                title = "Xposed 目标应用作用域",
+                description = "Xposed 框架支持自动申请与校验作用域；首次使用请把目标应用加入作用域后重新打开目标应用或返回本页复查",
                 actionLabel = if (targetInstalled) "申请作用域" else null
             ),
             PermissionHealthItem(
