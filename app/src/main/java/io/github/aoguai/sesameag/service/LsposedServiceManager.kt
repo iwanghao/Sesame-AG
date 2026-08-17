@@ -127,7 +127,7 @@ object LsposedServiceManager {
 
     fun requestTargetScope(onFinished: (ScopeRequestResult) -> Unit): Boolean {
         val frameworkStatus = connectedFrameworkStatus() ?: run {
-            onFinished(ScopeRequestResult(false, message = "Xposed service is not connected"))
+            onFinished(ScopeRequestResult(false, message = "LSPosed service is not connected"))
             return false
         }
         if (!frameworkStatus.hasRequiredApi) {
@@ -139,9 +139,17 @@ object LsposedServiceManager {
             )
             return false
         }
-        // Support all frameworks, not just LSPosed
+        if (!frameworkStatus.isSupportedLsposed) {
+            onFinished(
+                ScopeRequestResult(
+                    false,
+                    message = "Only official LSPosed is supported; current framework: ${frameworkStatus.frameworkName}"
+                )
+            )
+            return false
+        }
         val activeService = service ?: run {
-            onFinished(ScopeRequestResult(false, message = "Xposed service is not connected"))
+            onFinished(ScopeRequestResult(false, message = "LSPosed service is not connected"))
             return false
         }
 
@@ -162,7 +170,7 @@ object LsposedServiceManager {
             )
             true
         } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "Request Xposed scope failed", t)
+            Log.printStackTrace(TAG, "Request LSPosed scope failed", t)
             refreshScope()
             onFinished(ScopeRequestResult(false, message = t.message.orEmpty()))
             false
