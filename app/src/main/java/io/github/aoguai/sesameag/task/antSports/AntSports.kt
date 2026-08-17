@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.entity.MapperEntity
-import io.github.aoguai.sesameag.entity.SportsEnergyExchange
 import io.github.aoguai.sesameag.entity.friend.FriendCapabilityState
 import io.github.aoguai.sesameag.hook.AccountSessionCoordinator
 import io.github.aoguai.sesameag.hook.ApplicationHook
@@ -72,10 +71,10 @@ import kotlin.math.min
  *
  * @details
  * 负责统一调度蚂蚁运动相关的所有自动化逻辑，包括：
- * - 步数同步与行走路线（旧版 & 新版路线）
+ * - 步数同步与新版行走路线
  * - 运动任务面板任务、首页能量球任务
  * - 首页金币收集、慈善捐步
- * - 文体中心任务 / 行走路线
+ * - 文体中心任务 / 走路挑战赛
  * - 抢好友大战（训练好友 + 抢购好友）
  * - 健康岛（Neverland）任务、泡泡、走路建造
  *
@@ -109,31 +108,6 @@ class AntSports : ModelTask() {
         private const val SYNC_STEP_CONFIRM_TARGET_STEP_KEY = "target_step"
         const val PERSISTENT_CHILD_KIND = "sports_child_task"
         private const val MOTION_DAILY_QUIZ_REWARD_TASK_ID = "QUIZ_ANSWER_ENERGY_BALL_TASK"
-
-        private const val RPC_WALK_QUERY_PATH = "com.alipay.sportsplay.biz.rpc.walk.queryPath"
-        private const val RPC_WALK_QUERY_USER = "com.alipay.sportsplay.biz.rpc.walk.queryUser"
-        private const val RPC_WALK_QUERY_WORLD_MAP = "com.alipay.sportsplay.biz.rpc.walk.queryWorldMap"
-        private const val RPC_WALK_QUERY_CITY_PATH = "com.alipay.sportsplay.biz.rpc.walk.queryCityPath"
-        private const val RPC_WALK_QUERY_CITY_KNOWLEDGE_SUMMARY =
-            "com.alipay.sportsplay.biz.rpc.walk.queryCityKnowledgeSummary"
-        private const val RPC_WALK_QUERY_MEDAL_DETAIL =
-            "com.alipay.sportsplay.biz.rpc.walk.queryMedalDetail"
-        private const val RPC_WALK_QUERY_RECOMMEND_PATH_LIST =
-            "com.alipay.sportsplay.biz.rpc.walk.queryRecommendPathList"
-        private const val RPC_WALK_REVIVE_QUERY_DETAIL =
-            "com.alipay.sportsplay.biz.rpc.walk.steprevive.queryUserReviveStepT2"
-        private const val RPC_WALK_REVIVE_QUERY_TASK_LIST =
-            "com.alipay.sportsplay.biz.rpc.walk.steprevive.queryTaskList"
-        private const val RPC_WALK_REVIVE_QUERY_TASK_FINISH_STATUS =
-            "com.alipay.sportsplay.biz.rpc.walk.steprevive.queryTaskFinishStatus"
-        private const val RPC_TIYUBIZ_PATH_FEATURE_QUERY = "alipay.tiyubiz.path.feature.query"
-        private const val RPC_TIYUBIZ_PATH_MAP_HOMEPAGE = "alipay.tiyubiz.path.map.homepage"
-        private const val RPC_TIYUBIZ_PATH_MAP_STEP_QUERY = "alipay.tiyubiz.path.map.step.query"
-        private const val RPC_USER_ONLINE_GAME_LIST_QUERY = "alipay.tiyubiz.userOnlineGame.listquery"
-        private const val RPC_ONLINE_GAME_SPORTS_LIST_QUERY = "alipay.tiyubiz.onlineGame.sports.listquery"
-        private const val RPC_ONLINE_GAME_EVENT_QUERY = "alipay.tiyubiz.onlineGame.eventQuery"
-        private const val RPC_USER_ONLINE_GAME_DETAIL_QUERY = "alipay.tiyubiz.userOnlineGame.detailQuery.forwenti"
-        private const val RPC_USER_ONLINE_GAME_DATA_QUERY = "alipay.tiyubiz.userOnlineGame.dataQuery"
 
         private const val WALK_CHALLENGE_SPORTS_TYPE = "walk"
         private const val WALK_CHALLENGE_MIN_STEP_COUNT = 150
@@ -575,7 +549,7 @@ class AntSports : ModelTask() {
 
         // 文体中心 & 捐步 & 步数同步
         modelFields.addField(BooleanModelField("tiyubiz", "文体中心 | 开启", false).withDesc(
-            "执行文体中心签到、任务、线路推进和走路挑战赛线上赛。"
+            "执行文体中心签到、任务、奖励领取和走路挑战赛线上赛。"
         ).also { tiyubiz = it })
         modelFields.addField(
             IntegerModelField("minExchangeCount", "旧版捐步 | 最小步数", 0, 0, 100000).withDesc(
@@ -984,24 +958,6 @@ class AntSports : ModelTask() {
         return false
     }
 
-    private fun querySportsExchangeNeedEnergyValue(source: String): String {
-        return try {
-            val response = JSONObject(AntSportsRpcCall.NeverlandRpcCall.queryExchangeCondition(source))
-            if (!ResChecker.checkRes(TAG, response)) {
-                return "1"
-            }
-            val data = response.optJSONObject("data") ?: response.optJSONObject("result") ?: response
-            sequenceOf(
-                data.optString("needEnergyValue"),
-                data.optString("minEnergyValue"),
-                data.optString("assetAmount")
-            ).firstOrNull { it.isNotBlank() } ?: "1"
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "querySportsExchangeNeedEnergyValue err:", t)
-            "1"
-        }
-    }
-
     private fun buildSportsEnergyExchangeCandidate(raw: JSONObject): SportsEnergyExchangeCandidate? {
         val benefitId = raw.optString("benefitId").trim()
         val itemId = raw.optString("itemId").trim()
@@ -1212,39 +1168,78 @@ class AntSports : ModelTask() {
         val currentOwnerUserId = (AccountSessionCoordinator.currentUserId() ?: UserMap.currentUid).orEmpty()
         if (ownerUserId.isNotBlank() && ownerUserId != currentOwnerUserId) {
             Log.sports("运动持久子任务[$group][$childId]账号不匹配，跳过: owner=$ownerUserId current=$currentOwnerUserId")
+            PersistentScheduleRegistry.markFired(
+                ApplicationHook.appContext,
+                scheduleId,
+                source = "sports_owner_mismatch:$source",
+            )
             return true
         }
         if (!isPersistentChildSessionCurrent(currentOwnerUserId, payloadSessionEpoch)) {
             Log.sports("运动持久子任务[$group][$childId]会话无效，跳过触发: owner=$currentOwnerUserId session=$payloadSessionEpoch")
+            PersistentScheduleRegistry.markFired(
+                ApplicationHook.appContext,
+                scheduleId,
+                source = "sports_invalid_session:$source",
+            )
             return true
         }
         if (!isEnable()) {
             Log.sports("运动持久子任务[$group][$childId]触发时模块已关闭，跳过")
+            PersistentScheduleRegistry.markFired(
+                ApplicationHook.appContext,
+                scheduleId,
+                source = "sports_disabled:$source",
+            )
             return true
         }
-        GlobalThreadPools.execute {
-            PersistentScheduleRegistry.markRunning(scheduleId)
-            val executionLease = ApplicationHook.appContext?.let { context ->
-                WakeLockManager.acquire(
-                    context = context,
-                    timeoutMs = PersistentScheduleDefaults.TASK_EXECUTION_WAKELOCK_MS,
-                    source = "sports_persistent_child",
-                    scheduleId = scheduleId,
-                )
-            }
-            try {
-                runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
-                PersistentScheduleRegistry.markFired(ApplicationHook.appContext, scheduleId)
-            } catch (t: Throwable) {
-                Log.printStackTrace(TAG, "运动持久子任务执行失败[$group][$childId]", t)
+        val worker =
+            runCatching {
+                GlobalThreadPools.execute {
+                    PersistentScheduleRegistry.markRunning(scheduleId, source = "sports_worker_start:$source")
+                    val executionLease = ApplicationHook.appContext?.let { context ->
+                        WakeLockManager.acquire(
+                            context = context,
+                            timeoutMs = PersistentScheduleDefaults.TASK_EXECUTION_WAKELOCK_MS,
+                            source = "sports_persistent_child",
+                            scheduleId = scheduleId,
+                        )
+                    }
+                    try {
+                        runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
+                        PersistentScheduleRegistry.markFired(
+                            ApplicationHook.appContext,
+                            scheduleId,
+                            source = "sports_worker_success:$source",
+                        )
+                    } catch (t: Throwable) {
+                        Log.printStackTrace(TAG, "运动持久子任务执行失败[$group][$childId]", t)
+                        PersistentScheduleRegistry.markFailed(
+                            ApplicationHook.appContext,
+                            scheduleId,
+                            t.message ?: t.javaClass.simpleName,
+                            source = "sports_worker_exception:$source",
+                        )
+                    } finally {
+                        executionLease?.close()
+                    }
+                }
+            }.onFailure { error ->
+                Log.printStackTrace(TAG, "运动持久子任务提交失败[$group][$childId]", error)
                 PersistentScheduleRegistry.markFailed(
                     ApplicationHook.appContext,
                     scheduleId,
-                    t.message ?: t.javaClass.name,
+                    "worker_submit_failed:${error.javaClass.simpleName}",
+                    source = "sports_worker_submit:$source",
                 )
-            } finally {
-                executionLease?.close()
-            }
+            }.getOrNull() ?: return false
+        worker.invokeOnCompletion { error ->
+            PersistentScheduleRegistry.markWorkerFailedIfActive(
+                ApplicationHook.appContext,
+                scheduleId,
+                "worker_completed_without_terminal_state:${error?.javaClass?.simpleName ?: "none"}",
+                source = "sports_worker_completion:$source",
+            )
         }
         return true
     }
@@ -5680,148 +5675,6 @@ class AntSports : ModelTask() {
         }
     }
 
-    /**
-     * @brief 文体中心路径特性查询 + 行走任务/加入路径
-     */
-    internal fun pathFeatureQuery() {
-        try {
-            val s = AntSportsRpcCall.pathFeatureQuery()
-            var jo = JSONObject(s)
-            if (ResChecker.checkRes(TAG, jo)) {
-                val path = jo.getJSONObject("path")
-                val pathId = path.getString("pathId")
-                val title = path.getString("title")
-                val minGoStepCount = path.getInt("minGoStepCount")
-                if (jo.has("userPath")) {
-                    val userPath = jo.getJSONObject("userPath")
-                    val userPathRecordStatus = userPath.getString("userPathRecordStatus")
-                    if ("COMPLETED" == userPathRecordStatus) {
-                        pathMapHomepage(pathId)
-                        pathMapJoin(title, pathId)
-                    } else if ("GOING" == userPathRecordStatus) {
-                        pathMapHomepage(pathId)
-                        val countDate = TimeUtil.getFormatDate()
-                        jo = JSONObject(AntSportsRpcCall.stepQuery(countDate, pathId))
-                        if (ResChecker.checkRes(TAG, jo)) {
-                            val canGoStepCount = jo.getInt("canGoStepCount")
-                            if (canGoStepCount >= minGoStepCount) {
-                                val userPathRecordId = userPath.getString("userPathRecordId")
-                                tiyubizGo(countDate, title, canGoStepCount, pathId, userPathRecordId)
-                            }
-                        }
-                    }
-                } else {
-                    pathMapJoin(title, pathId)
-                }
-            } else {
-                Log.sports(jo.getString("resultDesc"))
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "pathFeatureQuery err:", t)
-        }
-    }
-
-    /**
-     * @brief 文体中心地图首页 & 奖励领取
-     */
-    private fun pathMapHomepage(pathId: String) {
-        try {
-            val s = AntSportsRpcCall.pathMapHomepage(pathId)
-            var jo = JSONObject(s)
-            if (ResChecker.checkRes(TAG, jo)) {
-                if (!jo.has("userPathGoRewardList")) return
-                val userPathGoRewardList = jo.getJSONArray("userPathGoRewardList")
-                for (i in 0 until userPathGoRewardList.length()) {
-                    jo = userPathGoRewardList.getJSONObject(i)
-                    if ("UNRECEIVED" != jo.getString("status")) continue
-                    val userPathRewardId = jo.getString("userPathRewardId")
-                    val res = JSONObject(AntSportsRpcCall.rewardReceive(pathId, userPathRewardId))
-                    if (ResChecker.checkRes(TAG, res)) {
-                        val detail = res.getJSONObject("userPathRewardDetail")
-                        val rightsRuleList = detail.getJSONArray("userPathRewardRightsList")
-                        val award = StringBuilder()
-                        for (j in 0 until rightsRuleList.length()) {
-                            val right = rightsRuleList.getJSONObject(j).getJSONObject("rightsContent")
-                            award.append(right.getString("name"))
-                                .append("*")
-                                .append(right.getInt("count"))
-                        }
-                        Log.sports("文体宝箱🎁[$award]")
-                    } else {
-                        Log.sports("文体中心开宝箱")
-                        Log.sports(res.toString())
-                    }
-                }
-            } else {
-                Log.sports("文体中心开宝箱")
-                Log.sports(s)
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "pathMapHomepage err:", t)
-        }
-    }
-
-    /**
-     * @brief 文体中心加入路线
-     */
-    private fun pathMapJoin(title: String, pathId: String) {
-        try {
-            val jo = JSONObject(AntSportsRpcCall.pathMapJoin(pathId))
-            if (isSportsRpcSuccess(jo)) {
-                Log.sports("加入线路🚶🏻‍♂️[$title]")
-                pathFeatureQuery()
-            } else if (isSportsRouteBusinessTerminal(extractSportsRpcErrorCode(jo))) {
-                val errorCode = extractSportsRpcErrorCode(jo)
-                val errorMsg = extractSportsRpcErrorMessage(jo)
-                Log.sports("文体中心路线[业务终态：已参加][$title][code=${errorCode.ifEmpty { "UNKNOWN" }}][msg=$errorMsg]"
-                )
-            } else {
-                Log.error(TAG, "文体中心路线[加入失败][$title] raw=$jo")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "pathMapJoin err:", t)
-        }
-    }
-
-    /**
-     * @brief 文体中心行走逻辑
-     */
-    private fun tiyubizGo(
-        countDate: String,
-        title: String,
-        goStepCount: Int,
-        pathId: String,
-        userPathRecordId: String
-    ) {
-        try {
-            val s = AntSportsRpcCall.tiyubizGo(countDate, goStepCount, pathId, userPathRecordId)
-            var jo = JSONObject(s)
-            if (isSportsRpcSuccess(jo)) {
-                jo = jo.getJSONObject("userPath")
-                Log.sports(
-                    "行走线路🚶🏻‍♂️[$title]#前进了" +
-                        jo.getInt("userPathRecordForwardStepCount") + "步"
-                )
-                pathMapHomepage(pathId)
-                val completed = "COMPLETED" == jo.getString("userPathRecordStatus")
-                if (completed) {
-                    Log.sports("完成线路🚶🏻‍♂️[$title]")
-                    pathFeatureQuery()
-                }
-            } else if (isSportsRouteBusinessTerminal(extractSportsRpcErrorCode(jo))) {
-                val errorCode = extractSportsRpcErrorCode(jo)
-                val errorMsg = extractSportsRpcErrorMessage(jo)
-                Log.sports("文体中心路线[业务终态：已完成][$title][code=${errorCode.ifEmpty { "UNKNOWN" }}][msg=$errorMsg]"
-                )
-                pathMapHomepage(pathId)
-            } else {
-                Log.error(TAG, "文体中心路线[前进失败][$title] raw=$s")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "tiyubizGo err:", t)
-        }
-    }
-
     // ---------------------------------------------------------------------
     // 抢好友大战
     // ---------------------------------------------------------------------
@@ -7104,9 +6957,18 @@ class AntSports : ModelTask() {
                 clearNeverlandTaskPendingConfirmation(taskId)
                 return true
             }
+            if (refreshedTask == null) {
+                markNeverlandTaskDoneToday(taskId)
+                clearNeverlandTaskPendingConfirmation(taskId)
+                Log.sports(
+                    "健康岛任务${action}动作已返回，任务中心查询成功但同任务已移除，按服务端消费终态处理" +
+                        "[taskId=$taskId]",
+                )
+                return true
+            }
             Log.sports(
                 "健康岛任务${action}动作已返回，但同任务仍未终态" +
-                    "[taskId=$taskId,status=${refreshedTask?.optString("taskStatus", "UNKNOWN") ?: "MISSING"}]",
+                    "[taskId=$taskId,status=${refreshedTask.optString("taskStatus", "UNKNOWN")}]",
             )
             return false
         }
@@ -8728,11 +8590,6 @@ class AntSports : ModelTask() {
     interface WalkPathTheme {
         companion object {
             const val DA_MEI_ZHONG_GUO = 0  ///< 大美中国 (默认)
-            const val GONG_YI_YI_XIAO_BU = 1  ///< 公益一小步
-            const val DENG_DING_ZHI_MA_SHAN = 2  ///< 登顶芝麻山
-            const val WEI_C_DA_TIAO_ZHAN = 3  ///< 维C大挑战
-            const val LONG_NIAN_QI_FU = 4  ///< 龙年祈福
-            const val SHOU_HU_TI_YU_MENG = 5  ///< 守护体育梦
 
             /** @brief 界面显示的名称列表 */
             val nickNames = arrayOf(
@@ -8746,7 +8603,7 @@ class AntSports : ModelTask() {
 
             /**
              * @brief 对应目标应用接口的 ThemeID 映射表
-             * @note 数组顺序必须与上方常量定义保持严格一致
+             * @note 数组顺序必须与名称列表保持严格一致
              */
             val themeIds = arrayOf(
                 "M202308082226",  ///< [0] 大美中国

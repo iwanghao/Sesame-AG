@@ -46,22 +46,10 @@ object AntSportsRpcCall {
     private const val TIME_ZONE = "Asia\\/Shanghai"
 
     /**
-     * @brief 版本号 - 蚂蚁运动版本
-     */
-    private const val VERSION = "3.0.1.2"
-
-    /**
      * @brief 城市代码 - 杭州
      */
     private const val CITY_CODE = "330100"
 
-    /**
-     * @brief 应用ID - 蚂蚁运动小程序ID
-     */
-    private const val APP_ID = "2021002116659397"
-
-    /** 最新路线页面抓包中的宿主应用与来源。 */
-    private const val SPORTS_WALK_APP_ID = "2019072565980504"
     private const val SPORTS_WALK_SOURCE = "ch_othertinyapp"
 
     /**
@@ -124,21 +112,6 @@ object AntSportsRpcCall {
     fun signUpTask(taskId: String): String {
         val args = """[{"apiVersion":"energy","chInfo":"medical_health","clientOS":"android","features":$FEATURES,"taskCenId":"","taskId":"$taskId"}]"""
         return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.SportsHealthCoinTaskRpc.signUpTask", args)
-    }
-
-    /**
-     * @brief 完成运动锻炼任务（旧版接口）
-     *
-     * @param taskId 任务ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @deprecated 该接口为旧版，建议使用 #completeTask
-     * @remark 对应API：com.alipay.sportshealth.biz.rpc.SportsHealthCoinTaskRpc.completeTask
-     */
-    fun completeExerciseTasks(taskId: String): String {
-        val args1 = """[{"chInfo":"ch_appcenter__chsub_9patch","clientOS":"android","features":$FEATURES,"taskAction":"JUMP","taskId":"$taskId"}]"""
-        return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.SportsHealthCoinTaskRpc.completeTask", args1)
     }
 
     /**
@@ -333,20 +306,6 @@ object AntSportsRpcCall {
     }
 
     /**
-     * @brief 查询运动主页信息
-     *
-     * @details 获取运动首页的数据，包括个人信息、排行榜等。
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportshealth.biz.rpc.queryMainPage
-     */
-    fun queryMainPage(): String {
-        val args = """{"apiVersion":"energy","chInfo":"ch_shouquan_shouye","cityCode":"$CITY_CODE","clientOS":"android","features":$FEATURES,"timezone":"Asia/Shanghai"}"""
-        return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.queryMainPage", args)
-    }
-
-    /**
      * @brief 运动健康签到/查询接口
      *
      * @param operatorType 操作类型
@@ -475,38 +434,6 @@ object AntSportsRpcCall {
     fun queryItemDetail(itemId: String): String {
         val arg = """[{"itemId":"$itemId"}]"""
         return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.SportsHealthItemCenterRpc.queryItemDetail", arg)
-    }
-
-    /**
-     * @brief 兑换礼品
-     *
-     * @param itemId 礼品ID
-     * @param coinAmount 消耗运动币数量
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportshealth.biz.rpc.SportsHealthItemCenterRpc.exchangeItem
-     */
-    fun exchangeItem(
-        itemId: String,
-        coinAmount: Int,
-    ): String {
-        val arg = """[{"coinAmount":$coinAmount,"itemId":"$itemId"}]"""
-        return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.SportsHealthItemCenterRpc.exchangeItem", arg)
-    }
-
-    /**
-     * @brief 查询兑换记录详情
-     *
-     * @param exchangeRecordId 兑换记录ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportshealth.biz.rpc.SportsHealthItemCenterRpc.queryExchangeRecordPage
-     */
-    fun queryExchangeRecordPage(exchangeRecordId: String): String {
-        val arg = """[{"exchangeRecordId":"$exchangeRecordId"}]"""
-        return RequestManager.requestString("com.alipay.sportshealth.biz.rpc.SportsHealthItemCenterRpc.queryExchangeRecordPage", arg)
     }
 
     /**
@@ -665,36 +592,6 @@ object AntSportsRpcCall {
     }
 
     /**
-     * @brief 查询主题列表 - 新版
-     *
-     * @details 获取可用的运动路线主题列表。
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportsplay.biz.rpc.walk.theme.queryThemeList
-     */
-    fun queryThemeList(): String =
-        RequestManager.requestString(
-            "com.alipay.sportsplay.biz.rpc.walk.theme.queryThemeList",
-            """[{"apiVersion":"energy","chInfo":"ch_othertinyapp","clientOS":"android","features":$FEATURES}]""",
-        )
-
-    /**
-     * @brief 查询世界地图 - 新版
-     *
-     * @param themeId 主题ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportsplay.biz.rpc.walk.queryWorldMap
-     */
-    fun queryWorldMap(themeId: String): String =
-        RequestManager.requestString(
-            "com.alipay.sportsplay.biz.rpc.walk.queryWorldMap",
-            """[{"apiVersion":"energy","chInfo":"ch_othertinyapp","clientOS":"android","features":$FEATURES,"themeId":"$themeId"}]""",
-        )
-
-    /**
      * @brief 查询城市路线 - 新版
      *
      * @param cityId 城市ID
@@ -760,19 +657,6 @@ object AntSportsRpcCall {
         RequestManager.requestString(
             "com.alipay.sportsplay.biz.rpc.walk.queryMedalDetail",
             """[{"chInfo":"$SPORTS_WALK_SOURCE","clientOS":"android","features":$FEATURES}]""",
-        )
-
-    /**
-     * @brief 查询服务端推荐的下一批路线
-     *
-     * @param pathId 当前路线 ID
-     *
-     * @remark 对应抓包：com.alipay.sportsplay.biz.rpc.walk.queryRecommendPathList
-     */
-    fun queryRecommendPathList(pathId: String): String =
-        RequestManager.requestString(
-            "com.alipay.sportsplay.biz.rpc.walk.queryRecommendPathList",
-            """[{"apiVersion":"energy","pathId":"$pathId","source":"ch_othertinyapp"}]""",
         )
 
     /**
@@ -916,37 +800,6 @@ object AntSportsRpcCall {
             "com.alipay.sportsplay.biz.rpc.walk.steprevive.reviveSteps",
             """[{"stepDate":"$stepDate","timeZone":"$TIME_ZONE"}]""",
         )
-
-    /**
-     * @brief 查询路线奖励 - 新版
-     *
-     * @param appId 应用ID
-     * @param pathId 路线ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：com.alipay.sportsplay.biz.rpc.walk.queryPathReward
-     */
-    fun queryPathReward(pathId: String): String =
-        RequestManager.requestString(
-            "com.alipay.sportsplay.biz.rpc.walk.queryPathReward",
-            """[{"chInfo":"$SPORTS_WALK_SOURCE","clientOS":"android","features":$FEATURES,"pathId":"$pathId"}]""",
-        )
-
-    /**
-     * @brief 兑换成功回调 - 旧版（已过时）
-     *
-     * @param exchangeId 兑换ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @deprecated 该接口已过时
-     * @remark 对应API：alipay.charity.mobile.donate.exchange.success
-     */
-    fun exchangeSuccess(exchangeId: String): String {
-        val args1 = """[{"exchangeId":"$exchangeId","timezone":"GMT+08:00","version":"$VERSION"}]"""
-        return RequestManager.requestString("alipay.charity.mobile.donate.exchange.success", args1)
-    }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 文体中心模块
@@ -1388,110 +1241,6 @@ object AntSportsRpcCall {
         )
     }
 
-    /**
-     * @brief 查询路线功能特性
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.feature.query
-     */
-    fun pathFeatureQuery(): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.feature.query",
-            """[{"appId":"$APP_ID","features":["USER_CURRENT_PATH_SIMPLE"],"sceneCode":"wenti_shijiebei"}]""",
-        )
-
-    /**
-     * @brief 加入路线地图
-     *
-     * @param pathId 路线ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.map.join
-     */
-    fun pathMapJoin(pathId: String): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.map.join",
-            """[{"appId":"$APP_ID","pathId":"$pathId"}]""",
-        )
-
-    /**
-     * @brief 查询路线地图首页
-     *
-     * @param pathId 路线ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.map.homepage
-     */
-    fun pathMapHomepage(pathId: String): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.map.homepage",
-            """[{"appId":"$APP_ID","pathId":"$pathId"}]""",
-        )
-
-    /**
-     * @brief 查询步数
-     *
-     * @param countDate 统计日期
-     * @param pathId 路线ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.map.step.query
-     */
-    fun stepQuery(
-        countDate: String,
-        pathId: String,
-    ): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.map.step.query",
-            """[{"appId":"$APP_ID","countDate":"$countDate","pathId":"$pathId","timeZone":"$TIME_ZONE"}]""",
-        )
-
-    /**
-     * @brief 行走路线（文体中心版本）
-     *
-     * @param countDate 统计日期
-     * @param goStepCount 行走步数
-     * @param pathId 路线ID
-     * @param userPathRecordId 用户路线记录ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.map.go
-     */
-    fun tiyubizGo(
-        countDate: String,
-        goStepCount: Int,
-        pathId: String,
-        userPathRecordId: String,
-    ): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.map.go",
-            """[{"appId":"$APP_ID","countDate":"$countDate","goStepCount":$goStepCount,"pathId":"$pathId","timeZone":"$TIME_ZONE","userPathRecordId":"$userPathRecordId"}]""",
-        )
-
-    /**
-     * @brief 领取路线奖励（文体中心版本）
-     *
-     * @param pathId 路线ID
-     * @param userPathRewardId 用户路线奖励ID
-     *
-     * @return RPC调用结果的 JSON 字符串
-     *
-     * @remark 对应API：alipay.tiyubiz.path.map.reward.receive
-     */
-    fun rewardReceive(
-        pathId: String,
-        userPathRewardId: String,
-    ): String =
-        RequestManager.requestString(
-            "alipay.tiyubiz.path.map.reward.receive",
-            """[{"appId":"$APP_ID","pathId":"$pathId","userPathRewardId":"$userPathRewardId"}]""",
-        )
-
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 抢好友大战模块
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1698,41 +1447,6 @@ object AntSportsRpcCall {
                 NEVERLAND_QUERY_BUBBLE_TASK_RPC,
                 """[{"source":"$source","sportsAuthed":true}]""",
             )
-
-        fun queryExchangeCondition(source: String): String {
-            val args =
-                JSONArray()
-                    .put(
-                        JSONObject().apply {
-                            put("assetType", "RED_PACKAGE_PIECE")
-                            put("source", source)
-                        },
-                    ).toString()
-            return RequestManager.requestString(
-                "com.alipay.neverland.biz.rpc.queryExchangeCondition",
-                args,
-            )
-        }
-
-        fun autoRecommendItem(
-            source: String,
-            needEnergyValue: String = "1",
-        ): String {
-            val args =
-                JSONArray()
-                    .put(
-                        JSONObject().apply {
-                            put("extInfo", JSONObject().put("needEnergyValue", needEnergyValue))
-                            put("filterItemSalePrice", true)
-                            put("filterItemStatus", true)
-                            put("source", source)
-                        },
-                    ).toString()
-            return RequestManager.requestString(
-                "com.alipay.neverland.biz.rpc.autoRecommendItem",
-                args,
-            )
-        }
 
         private fun sportsItemMallFeatures(): JSONArray =
             JSONArray().apply {

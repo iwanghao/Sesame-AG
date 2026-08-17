@@ -50,7 +50,6 @@ object ModelFieldTodayStateResolver {
             "deliverMsgSend" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND, "今日道早安已处理"),
             "shareToFriends" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS, "今日家庭分享已处理"),
             "inviteFriendVisitFamily" to OptionFlagState(StatusFlags.FLAG_FARM_INVITE_FRIEND_VISIT_FAMILY, "今日好友串门邀请已处理"),
-            "batchInviteP2P" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_BATCH_INVITE_P2P, "今日串门送扭蛋已处理"),
             "ExchangeFamilyDecoration" to OptionFlagState(
                 flag = "",
                 reason = "今日兑换装修物品已处理",
@@ -142,6 +141,14 @@ object ModelFieldTodayStateResolver {
                     StatusFlags.FLAG_ANTMEMBER_YEB_EXP_GOLD_EXCHANGE_DONE,
                     reason = "今日余额宝体验金签到、券处理及兑换检查已完成",
                 )
+            }
+
+            "AntMember.CollectStickers" -> {
+                flag(StatusFlags.FLAG_ANTMEMBER_STICKERS_DONE, "今日账单贴纸已处理")
+            }
+
+            "AntMember.billBlockWorld" -> {
+                flag(StatusFlags.FLAG_ANTMEMBER_BILL_BLOCK_WORLD_DONE, "今日账单拼贴世界已处理")
             }
 
             "AntMember.memberPointExchangeBenefit" -> {

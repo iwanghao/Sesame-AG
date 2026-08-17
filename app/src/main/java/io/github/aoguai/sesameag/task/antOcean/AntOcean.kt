@@ -63,20 +63,6 @@ class AntOcean : ModelTask() {
         ENERGY_LACK(2, "能量不足"),
         ;
 
-        companion object {
-            /**
-             * 根据字符串获取对应枚举
-             */
-            fun fromString(value: String): ApplyAction? {
-                for (action in values()) {
-                    if (action.name.equals(value, ignoreCase = true)) {
-                        return action
-                    }
-                }
-                Log.error("ApplyAction", "Unknown applyAction: $value")
-                return null
-            }
-        }
     }
 
     /**
@@ -1277,6 +1263,11 @@ class AntOcean : ModelTask() {
 
     private fun collectEnergy(bubbleVOList: JSONArray) {
         val antForest = getModel(AntForest::class.java)
+//        复用森林收取能量总开关 当没有打开时，不执行
+        if (antForest == null || !antForest.isCollectEnergyEnabled()) {
+            Log.runtime(TAG, "神奇海洋🌊能量球 收能量未开启，跳过收取")
+            return
+        }
         // 逐条处理：单个能量球字段缺失/结构变化只跳过该条并记录，不再因一个异常中断整段收取（根因A）
         for (i in 0 until bubbleVOList.length()) {
             try {
@@ -1294,7 +1285,8 @@ class AntOcean : ModelTask() {
                     Log.runtime(TAG, "神奇海洋🌊能量球[$bubbleId]缺少有效能量值，跳过收取")
                     continue
                 }
-                if (antForest != null && !antForest.shouldCollectSelfBubble(energy)) {
+                if (!antForest.shouldCollectSelfBubble(energy)) {
+                    Log.runtime(TAG, "神奇海洋🌊能量球[$bubbleId]能量值低于阈值，跳过收取")
                     continue
                 }
                 val s = AntOceanRpcCall.collectEnergy(bubbleId.toString(), userId)
@@ -1743,6 +1735,17 @@ class AntOcean : ModelTask() {
                 return
             }
             if (!ResChecker.checkRes(TAG, jo)) {
+                if (isFriendPieceReceiveLimit(jo)) {
+                    Log.error(
+                        TAG,
+                        "神奇海洋🌊[送碎片]#好友=$userId 已被其他用户送过，跳过当前好友并继续后续选择",
+                    )
+                } else {
+                    Log.error(
+                        TAG,
+                        "神奇海洋🌊[送碎片]#好友=$userId 请求失败:" + extractOceanTaskFailureMessage(jo),
+                    )
+                }
                 return
             }
             extractNestedJsonArray(jo, "normalRewardVOS")?.let { checkReward(it) }
@@ -2452,11 +2455,6 @@ class AntOcean : ModelTask() {
         )
     }
 
-    private fun canRetrySelfOceanCleanTask(): Boolean =
-        cleanOcean?.value == true &&
-            !selfOceanCleanRetried &&
-            !currentOceanUserId.isNullOrBlank()
-
     private fun finishOceanTask(item: TaskFlowItem): TaskFlowActionResult {
         val response = AntOceanRpcCall.finishTask(item.sceneCode, item.type)
         val result =
@@ -2661,6 +2659,9 @@ class AntOcean : ModelTask() {
         return code == "PIECE_HAVE_GAVE" ||
             containsAnyOcean(message, "碎片已经成功送出啦")
     }
+
+    private fun isFriendPieceReceiveLimit(response: JSONObject): Boolean =
+        extractOceanTaskFailureCode(response) == "RECEIVE_PIECE_LIMIT"
 
     private fun extractOceanTaskFailureCode(response: JSONObject): String =
         response

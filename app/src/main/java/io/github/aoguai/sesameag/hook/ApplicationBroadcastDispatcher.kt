@@ -45,6 +45,18 @@ internal object ApplicationBroadcastDispatcher {
         if (finalProcessName != null && finalProcessName.endsWith(":widgetProvider")) {
             return
         }
+        if (!RuntimeIdentityGuard.isTrustedForExecution()) {
+            record(TAG, "execution_gate_denied: runtime_identity")
+            return
+        }
+        val nonBusinessActions = setOf(
+            ApplicationHookConstants.BroadcastActions.HOOK_READY,
+            ApplicationHookConstants.BroadcastActions.PERMISSION_SNAPSHOT,
+        )
+        if (action !in nonBusinessActions && !isCurrentAccountExecutable()) {
+            record(TAG, "execution_gate_denied: account_slot")
+            return
+        }
 
         when (action) {
             ApplicationHookConstants.BroadcastActions.RESTART -> handleRestartBroadcast(safeIntent)
@@ -59,6 +71,12 @@ internal object ApplicationBroadcastDispatcher {
             ApplicationHookConstants.BroadcastActions.REFRESH_FRIENDS -> handleRefreshFriendsBroadcast(context, safeIntent)
             ApplicationHookConstants.BroadcastActions.REFRESH_EXCHANGE_OPTIONS -> handleRefreshExchangeOptionsBroadcast(context, safeIntent)
         }
+    }
+
+    private fun isCurrentAccountExecutable(): Boolean {
+        val loader = ApplicationHook.classLoader ?: return false
+        val userId = runCatching { HookUtil.getUserId(loader) }.getOrNull()
+        return AccountSlotRegistry.isExecutableUser(userId)
     }
 
     private fun handleRestartBroadcast(intent: Intent) {
@@ -663,6 +681,27 @@ internal object ApplicationBroadcastDispatcher {
                         CustomTask.FARM_USE_TOOL -> {
                             extraParams["toolType"] = intent.getStringExtra("toolType") ?: ""
                             extraParams["toolCount"] = intent.getIntExtra("toolCount", 1)
+                        }
+
+                        // 任务模块整体手动触发，无需额外参数
+                        CustomTask.ANT_FOREST,
+                        CustomTask.ANT_FARM,
+                        CustomTask.ANT_OCEAN,
+                        CustomTask.ANT_STALL,
+                        CustomTask.ANT_DODO,
+                        CustomTask.ANT_COOPERATE,
+                        CustomTask.ANT_MEMBER,
+                        CustomTask.ANT_SESAME_CREDIT,
+                        CustomTask.ANT_ORCHARD,
+                        CustomTask.ANT_FISH_POND,
+                        CustomTask.ANT_SPORTS,
+                        CustomTask.YOUTH_PRIVILEGE,
+                        CustomTask.ECO_PROTECTION,
+                        CustomTask.GREEN_FINANCE,
+                        CustomTask.MY_BANK_WELFARE,
+                        CustomTask.RESERVE,
+                        CustomTask.OTHER_TASK -> {
+                            Unit
                         }
 
                         else -> {

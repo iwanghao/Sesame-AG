@@ -10,13 +10,13 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
@@ -24,32 +24,44 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.aoguai.sesameag.SesameApplication.Companion.PREFERENCES_KEY
 import io.github.aoguai.sesameag.SesameApplication.Companion.hasPermissions
 import io.github.aoguai.sesameag.data.General
+import io.github.aoguai.sesameag.data.Config
+import io.github.aoguai.sesameag.hook.AccountSlotRegistry
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleRegistry
+import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
 import io.github.aoguai.sesameag.service.ConnectionState
 import io.github.aoguai.sesameag.service.LsposedServiceManager
-import io.github.aoguai.sesameag.ui.extension.openUrl
-import io.github.aoguai.sesameag.ui.extension.performNavigationToSettings
+import io.github.aoguai.sesameag.model.Model
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthItem
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthSnapshot
 import io.github.aoguai.sesameag.ui.permissions.PermissionPolicy
 import io.github.aoguai.sesameag.ui.permissions.PermissionRequirement
 import io.github.aoguai.sesameag.ui.permissions.PermissionStatus
 import io.github.aoguai.sesameag.ui.screen.MainScreen
+import io.github.aoguai.sesameag.ui.navigation.LogSource
 import io.github.aoguai.sesameag.ui.theme.AppTheme
 import io.github.aoguai.sesameag.ui.theme.ThemeManager
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
+import io.github.aoguai.sesameag.task.customTasks.CustomTask
 import io.github.aoguai.sesameag.util.CommandUtil
+import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.IconManager
+import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.LogChannel
+import io.github.aoguai.sesameag.util.Logback
 import io.github.aoguai.sesameag.util.PermissionUtil
 import io.github.aoguai.sesameag.util.ToastUtil
+import io.github.aoguai.sesameag.util.UserDataStoreManager
+import io.github.aoguai.sesameag.util.maps.UserMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
-import java.io.File
 
 class MainActivity : ComponentActivity() {
     private data class ExactAlarmManifestState(
@@ -79,6 +91,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val viewModel: MainViewModel by viewModels()
+    private val clearModuleDataFailures = MutableStateFlow<List<String>>(emptyList())
     private val runtimePermissionsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             onRuntimePermissionRequestFinished(result)
@@ -182,7 +195,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         ContextCompat.registerReceiver(
             this,
             targetPermissionSnapshotReceiver,
@@ -219,8 +235,10 @@ class MainActivity : ComponentActivity() {
             val moduleStatus by viewModel.moduleStatus.collectAsStateWithLifecycle()
             //  获取实时的 UserEntity 列表
             val userList by viewModel.userList.collectAsStateWithLifecycle()
+            val accountSlots by viewModel.accountSlots.collectAsStateWithLifecycle()
             val permissionHealth by viewModel.permissionHealth.collectAsStateWithLifecycle()
             val isDynamicColor by ThemeManager.isDynamicColor.collectAsStateWithLifecycle()
+            val clearFailurePaths by clearModuleDataFailures.collectAsStateWithLifecycle()
 
             // AppTheme 会处理状态栏颜色
             AppTheme(dynamicColor = isDynamicColor) {
@@ -234,12 +252,34 @@ class MainActivity : ComponentActivity() {
                     isDynamicColor = isDynamicColor, // 传给 MainScreen
                     // 传入回调
                     userList = userList, // 传入列表
-                    // 🔥 处理跳转逻辑
-                    onNavigateToSettings = { selectedUser ->
-                        performNavigationToSettings(selectedUser)
-                    },
-                    onEvent = { event -> handleEvent(event) }
+                    accountSlots = accountSlots,
+                    onPrepareManualTasks = ::ensureManualTaskConfigLoaded,
+                    onRunManualTask = ::runManualTask,
+                    clearModuleDataFailurePaths = clearFailurePaths,
+                    onDismissClearModuleDataFailure = { clearModuleDataFailures.value = emptyList() },
+                    onEvent = { event -> handleEvent(event) },
+                    onExitRequested = ::finish,
                 )
+            }
+        }
+        requestHighestSupportedFrameRate()
+    }
+
+    private fun requestHighestSupportedFrameRate() {
+        val modes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display?.supportedModes
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.supportedModes
+        }
+        val requestedFrameRate = modes?.maxOfOrNull { it.refreshRate } ?: return
+        if (requestedFrameRate <= 60f) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window.decorView.setRequestedFrameRate(requestedFrameRate)
+        } else {
+            window.attributes = window.attributes.apply {
+                preferredRefreshRate = requestedFrameRate
             }
         }
     }
@@ -250,7 +290,6 @@ class MainActivity : ComponentActivity() {
     sealed class MainUiEvent {
         data object RefreshOneWord : MainUiEvent()
         data class OpenLog(val channel: LogChannel) : MainUiEvent()
-        data object OpenGithub : MainUiEvent()
         data class ToggleIconHidden(val isHidden: Boolean) : MainUiEvent()
         data object OpenExtend : MainUiEvent()
         data object ClearConfig : MainUiEvent()
@@ -263,8 +302,7 @@ class MainActivity : ComponentActivity() {
     private fun handleEvent(event: MainUiEvent) {
         when (event) {
             MainUiEvent.RefreshOneWord -> viewModel.fetchOneWord()
-            is MainUiEvent.OpenLog -> openLogChannel(event.channel)
-            MainUiEvent.OpenGithub -> openUrl(General.PROJECT_HOMEPAGE_URL)
+            is MainUiEvent.OpenLog -> Unit
             is MainUiEvent.RequestPermissionCheck -> {
                 requestAllPermissionsFromCard(event.onCompleted)
             }
@@ -275,25 +313,98 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this, "设置已保存，可能需要重启桌面才能生效", Toast.LENGTH_SHORT).show()
             }
 
-            MainUiEvent.OpenExtend -> startActivity(Intent(this, ExtendActivity::class.java))
+            MainUiEvent.OpenExtend -> Unit
             MainUiEvent.ClearConfig -> {
-                // 🔥 这里只负责执行逻辑，不再负责弹窗
-                if (Files.delFile(Files.CONFIG_DIR)) {
-                    ToastUtil.showToast(this, "🙂 清空配置成功")
-                    // 可选：重载配置或刷新 UI
-                    viewModel.refreshUserConfigs()
-                } else {
-                    ToastUtil.showToast(this, "😭 清空配置失败")
+                clearModuleDataFailures.value = emptyList()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching { DataStore.shutdown() }
+                    runCatching { UserDataStoreManager.shutdownAll() }
+                    runCatching { PersistentScheduleRegistry.clearAll(applicationContext) }
+                    runCatching { UnifiedScheduler.cleanup() }
+
+                    val fileResult = Files.clearAllModuleData(applicationContext)
+                    val preferencesCleared =
+                        getSharedPreferences(PREFERENCES_KEY, MODE_PRIVATE)
+                            .edit()
+                            .clear()
+                            .commit()
+                    val failedPaths = fileResult.failedPaths.toMutableList()
+                    if (!preferencesCleared) {
+                        failedPaths += "SharedPreferences:$PREFERENCES_KEY"
+                    }
+                    if (failedPaths.isNotEmpty()) {
+                        Log.runtime(
+                            "MainActivity",
+                            "清除模块数据失败: count=${failedPaths.size}, first=${failedPaths.first()}"
+                        )
+                    }
+
+                    runCatching {
+                        Logback.reloadFileLogging(enableCaptureAppender = true)
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        viewModel.refreshUserConfigs()
+                        if (failedPaths.isEmpty()) {
+                            ThemeManager.resetToDefaults()
+                            IconManager.syncIconState(this@MainActivity, false)
+                            sendBroadcast(
+                                Intent(ApplicationHookConstants.BroadcastActions.RESTART).apply {
+                                    putExtra("configReload", true)
+                                }
+                            )
+                            ToastUtil.showToast(this@MainActivity, "已清除全部模块数据，正在恢复默认配置")
+                            recreate()
+                        } else {
+                            clearModuleDataFailures.value = failedPaths.toList()
+                        }
+                    }
                 }
             }
         }
     }
 
-    private fun openLogChannel(channel: LogChannel) {
-        openLogFile(Files.getLogFile(channel))
+    // --- 辅助方法 ---
+
+    private suspend fun ensureManualTaskConfigLoaded() = withContext(Dispatchers.IO) {
+        Model.initAllModel()
+        val activeUser = DataStore.get("activedUser", io.github.aoguai.sesameag.entity.UserEntity::class.java)
+        activeUser?.userId?.let { userId ->
+            UserMap.setCurrentUserId(userId)
+            Config.load(userId)
+        }
     }
 
-    // --- 辅助方法 ---
+    private fun runManualTask(task: CustomTask, params: Map<String, Any>): LogSource? {
+        val activeUserId = DataStore.get("activedUser", io.github.aoguai.sesameag.entity.UserEntity::class.java)?.userId
+        if (!AccountSlotRegistry.isExecutableUser(activeUserId)) {
+            ToastUtil.showToast(this, "当前账号不在可执行槽位，无法运行手动任务")
+            return null
+        }
+        return try {
+            val intent = Intent(ApplicationHookConstants.BroadcastActions.MANUAL_TASK)
+            intent.putExtra("task", task.name)
+            params.forEach { (key, value) ->
+                when (value) {
+                    is Int -> intent.putExtra(key, value)
+                    is String -> intent.putExtra(key, value)
+                    is Boolean -> intent.putExtra(key, value)
+                }
+            }
+            sendBroadcast(intent)
+            ToastUtil.showToast(this, "已发送指令: ${task.displayName}")
+            val logFile = Files.getLogFile(LogChannel.RECORD)
+            if (logFile.exists()) {
+                LogSource.FilePath(logFile.absolutePath)
+            } else {
+                ToastUtil.showToast(this, "日志文件尚未生成")
+                null
+            }
+        } catch (e: Exception) {
+            ToastUtil.showToast(this, "发送失败: ${e.message}")
+            null
+        }
+    }
 
     private fun setupShizuku() {
         Shizuku.addRequestPermissionResultListener(shizukuListener)
@@ -347,17 +458,6 @@ class MainActivity : ComponentActivity() {
         LsposedServiceManager.removeConnectionListener(lspConnectionListener)
         Shizuku.removeRequestPermissionResultListener(shizukuListener)
         runCatching { unregisterReceiver(targetPermissionSnapshotReceiver) }
-    }
-
-    private fun openLogFile(logFile: File) {
-        if (!logFile.exists()) {
-            ToastUtil.showToast(this, "日志文件不存在: ${logFile.name}")
-            return
-        }
-        val intent = Intent(this, LogViewerActivity::class.java).apply {
-            data = logFile.toUri()
-        }
-        startActivity(intent)
     }
 
     private fun onRuntimePermissionRequestFinished(result: Map<String, Boolean>) {
