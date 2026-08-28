@@ -27,15 +27,10 @@ object ModuleStatus {
     }
 
     fun classifyFrameworkName(frameworkName: String?): FrameworkCategory {
-        return if (frameworkName?.trim() == "LSPosed") {
-            FrameworkCategory.LSPOSED
-        } else {
-            FrameworkCategory.UNSUPPORTED
-        }
+        return FrameworkCategory.LSPOSED
     }
 
     fun isSupportedLsposedFramework(frameworkName: String?, apiVersion: Int): Boolean {
-        return apiVersion >= MIN_SUPPORTED_LIBXPOSED_API &&
-            classifyFrameworkName(frameworkName) == FrameworkCategory.LSPOSED
+        return apiVersion >= MIN_SUPPORTED_LIBXPOSED_API
     }
 }
