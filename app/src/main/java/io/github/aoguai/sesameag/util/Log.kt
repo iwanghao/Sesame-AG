@@ -241,6 +241,16 @@ object Log {
     }
 
     @JvmStatic
+    fun goldenBean(msg: String) {
+        business(LogChannel.GOLDEN_BEAN, msg)
+    }
+
+    @JvmStatic
+    fun goldenBean(tag: String, msg: String) {
+        goldenBean(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
     @JvmOverloads
     fun farm(msg: String, type: Int = 1) {
         business(LogChannel.FARM, msg, type)
@@ -318,7 +328,9 @@ object Log {
 
     @JvmStatic
     fun capture(msg: String) {
-        write(LogChannel.CAPTURE, Severity.INFO, msg)
+        // capture.log is shared by processes; keep every legacy capture record on one physical line.
+        val singleLineMessage = msg.replace("\r", "\\r").replace("\n", "\\n")
+        write(LogChannel.CAPTURE, Severity.INFO, singleLineMessage)
     }
 
     @JvmStatic

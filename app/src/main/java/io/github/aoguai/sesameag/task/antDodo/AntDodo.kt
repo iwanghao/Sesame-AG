@@ -23,14 +23,15 @@ import io.github.aoguai.sesameag.model.modelFieldExt.FriendSelectionModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.TaskStatus
+import io.github.aoguai.sesameag.task.common.DeferredReason
 import io.github.aoguai.sesameag.task.common.TaskFlowAction
 import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
 import io.github.aoguai.sesameag.task.common.TaskFlowAdapter
-import io.github.aoguai.sesameag.task.common.TaskFlowDecision
 import io.github.aoguai.sesameag.task.common.TaskFlowEngine
 import io.github.aoguai.sesameag.task.common.TaskFlowItem
 import io.github.aoguai.sesameag.task.common.TaskFlowPhase
 import io.github.aoguai.sesameag.task.common.TaskRpcFailureType
+import io.github.aoguai.sesameag.task.common.GameCenterPlayRpcCall
 import io.github.aoguai.sesameag.task.exchange.ExchangeEffectNeed
 import io.github.aoguai.sesameag.task.exchange.ExchangeReplenishResult
 import io.github.aoguai.sesameag.task.exchange.ExchangeReplenisher
@@ -60,8 +61,6 @@ class AntDodo : ModelTask() {
     private var usePropCollectHistoryAnimal7Days: BooleanModelField? = null
     private var usePropCollectToFriendTimes7Days: BooleanModelField? = null
     private var autoGenerateBook: BooleanModelField? = null
-    private val handledTaskFinishes = LinkedHashSet<String>()
-    private val handledTaskAwards = LinkedHashSet<String>()
     private val loggedTaskProgressHints = LinkedHashSet<String>()
 
     override fun getName(): String = "神奇物种"
@@ -108,17 +107,17 @@ class AntDodo : ModelTask() {
         )
         modelFields.addField(
             BooleanModelField("usePropCollectTimes7Days", "道具 | 抽卡道具", false).withDesc(
-                "单独开启后仅使用抽卡类道具；开启“道具 | 使用全部”时也会一起生效。"
+                "单独开启后使用抽卡类道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectTimes7Days = it }
         )
         modelFields.addField(
             BooleanModelField("usePropCollectHistoryAnimal7Days", "道具 | 抽历史卡道具", false).withDesc(
-                "单独开启后仅使用历史卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
+                "单独开启后使用历史卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectHistoryAnimal7Days = it }
         )
         modelFields.addField(
             BooleanModelField("usePropCollectToFriendTimes7Days", "道具 | 抽好友卡道具", false).withDesc(
-                "单独开启后仅使用好友卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
+                "单独开启后使用好友卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectToFriendTimes7Days = it }
         )
         modelFields.addField(
@@ -146,8 +145,6 @@ class AntDodo : ModelTask() {
     override fun runJava() {
         try {
             Log.dodo("执行开始-${getName()}")
-            handledTaskFinishes.clear()
-            handledTaskAwards.clear()
             loggedTaskProgressHints.clear()
             receiveTaskAward()
             collect()
@@ -391,15 +388,6 @@ class AntDodo : ModelTask() {
             }
         }
 
-        override fun shouldSkip(item: TaskFlowItem): Boolean {
-            val taskKey = buildTaskKey(item.sceneCode, item.type)
-            return when {
-                handledTaskAwards.contains(taskKey) && mapPhase(item) == TaskFlowPhase.REWARD_READY -> true
-                handledTaskFinishes.contains(taskKey) && mapPhase(item) == TaskFlowPhase.READY_TO_COMPLETE -> true
-                else -> false
-            }
-        }
-
         override fun isBlacklisted(item: TaskFlowItem): Boolean {
             if (isConsecutiveCollectTask(item.type, item.title)) {
                 return false
@@ -452,15 +440,56 @@ class AntDodo : ModelTask() {
                     detail = dodoActionDetail(item, "reDecisionTaskOpenGreen")
                 )
             }
-            val bizInfo = raw.optJSONObject("bizInfo") ?: JSONObject()
-            val response = finishTodoTask(taskBaseInfo, bizInfo, item.sceneCode, item.type)
+            val unsupportedGameDetail = unsupportedGameTaskDetail(taskBaseInfo)
+            val gameContract = dodoGamePlayContract(taskBaseInfo, raw.optJSONObject("bizInfo"))
+            gameContract?.let { contract ->
+                val ack = GameCenterPlayRpcCall.submitForAck(contract)
+                val response = ack.response
+                    ?: return TaskFlowActionResult.failure(
+                        failureType = ack.failureType,
+                        message = "时长动作响应无法解析",
+                        rpc = "GameCenterPlayRpcCall.submit",
+                        raw = ack.raw,
+                        detail = dodoActionDetail(item, "playDuration"),
+                    )
+                if (!ack.accepted) {
+                    return TaskFlowActionResult.failure(
+                        failureType = ack.failureType,
+                        code = response.optString("resultCode"),
+                        message = response.optString("resultDesc", response.optString("desc", ack.raw)),
+                        rpc = "GameCenterPlayRpcCall.submit",
+                        raw = ack.raw,
+                        detail = dodoActionDetail(item, "playDuration"),
+                    )
+                }
+                Log.dodo("物种任务🧾️[${item.title}]时长上报已接受，继续物种任务完成闭环")
+            }
+            if (unsupportedGameDetail != null && gameContract == null) {
+                val detail = dodoActionDetail(item, "finishTask") + " $unsupportedGameDetail"
+                Log.error(TAG, "神奇物种外部游戏任务缺少稳定完成RPC闭环，跳过伪完成: $detail")
+                return TaskFlowActionResult.failure(
+                    failureType = TaskRpcFailureType.UNSUPPORTED_NO_CLOSURE,
+                    code = "UNSUPPORTED_GAMEPLAY_TASK",
+                    message = "外部游戏任务缺少稳定完成RPC闭环",
+                    rpc = "DodoTaskFlowAdapter.finishTask",
+                    detail = detail,
+                )
+            }
+            val response = AntDodoRpcCall.finishTask(item.sceneCode, item.type)
             if (response.isNullOrEmpty()) {
                 return emptyActionResponse("AntDodoRpcCall.finishTask", item, "finishTask")
             }
             val result = JSONObject(response)
             if (isDodoTaskRpcSuccess(result)) {
-                Log.dodo("物种任务🧾️[${item.title}]")
-                return TaskFlowActionResult.success()
+                Log.dodo("物种任务🧾️[${item.title}]已提交，等待任务列表确认")
+                return TaskFlowActionResult.defer(
+                    deferredReason = DeferredReason.STATE_CONFIRMATION,
+                    message = "finishTask已返回成功，等待物种任务列表确认",
+                    rpc = "AntDodoRpcCall.finishTask",
+                    raw = result.toString(),
+                    detail = dodoActionDetail(item, "finishTask"),
+                    refreshAfterAction = true,
+                )
             }
             return dodoActionFailureResult(
                 response = result,
@@ -478,24 +507,6 @@ class AntDodo : ModelTask() {
             }
         }
 
-        override fun afterSuccess(item: TaskFlowItem, action: TaskFlowAction, result: TaskFlowActionResult) {
-            rememberHandledTask(item, action)
-        }
-
-        override fun afterFailure(
-            item: TaskFlowItem,
-            action: TaskFlowAction,
-            result: TaskFlowActionResult,
-            decision: TaskFlowDecision
-        ) {
-            if (decision == TaskFlowDecision.MARK_HANDLED ||
-                decision == TaskFlowDecision.STOP_TODAY_OR_CURRENT_CHAIN ||
-                decision == TaskFlowDecision.BLACKLIST
-            ) {
-                rememberHandledTask(item, action)
-            }
-        }
-
         override fun onQueryFailed(response: JSONObject) {
             Log.error(TAG, "神奇物种任务列表查询失败 raw=$response")
         }
@@ -506,15 +517,6 @@ class AntDodo : ModelTask() {
 
         override fun logError(message: String) {
             Log.error(TAG, message)
-        }
-
-        private fun rememberHandledTask(item: TaskFlowItem, action: TaskFlowAction) {
-            val taskKey = buildTaskKey(item.sceneCode, item.type)
-            when (action) {
-                TaskFlowAction.RECEIVE -> handledTaskAwards.add(taskKey)
-                TaskFlowAction.COMPLETE -> handledTaskFinishes.add(taskKey)
-                else -> Unit
-            }
         }
 
         private fun emptyActionResponse(
@@ -698,32 +700,29 @@ class AntDodo : ModelTask() {
         return result
     }
 
-    private fun finishTodoTask(
-        taskBaseInfo: JSONObject,
-        bizInfo: JSONObject,
-        sceneCode: String,
-        taskType: String
-    ): String {
-        if (taskType.startsWith("GAME_") || taskType.contains("WZDAOLIU")) {
-            extractDodoGameAppId(taskBaseInfo, bizInfo)?.let { appId ->
-                AntDodoRpcCall.clickGame(appId)
-            }
+    private fun unsupportedGameTaskDetail(taskBaseInfo: JSONObject): String? {
+        val prodPlayParam = parseDodoBizInfo(taskBaseInfo.opt("prodPlayParam"))
+        val taskCategorization = prodPlayParam.optJSONObject("taskCategorization") ?: return null
+        val categorizationSecondLevel = taskCategorization.optString("categorizationSecondLevel").trim()
+        val gameId = taskCategorization
+            .optJSONObject("categorizationParamModel")
+            ?.optString("game_id")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        if (!categorizationSecondLevel.equals("Game", ignoreCase = true)) {
+            return null
         }
-        return AntDodoRpcCall.finishTask(sceneCode, taskType)
+        val taskProdPlayType = taskBaseInfo.optString("taskProdPlayType").trim()
+        return "categorizationSecondLevel=$categorizationSecondLevel " +
+            "taskProdPlayType=${taskProdPlayType.ifBlank { "UNKNOWN" }} gameId=$gameId"
     }
 
-    private fun extractDodoGameAppId(taskBaseInfo: JSONObject, bizInfo: JSONObject): String? {
-        val taskJumpUrl = bizInfo.optString("taskJumpUrl")
-        val appIdFromUrl = Regex("appId=(\\d+)").find(taskJumpUrl)?.groupValues?.getOrNull(1)
-        if (!appIdFromUrl.isNullOrBlank()) {
-            return appIdFromUrl
-        }
-        return JSONObject(taskBaseInfo.optString("prodPlayParam", "{}"))
-            .optJSONObject("taskCategorization")
-            ?.optJSONObject("categorizationParamModel")
-            ?.optString("game_id")
-            ?.takeIf { it.isNotBlank() }
-    }
+    private fun dodoGamePlayContract(
+        taskBaseInfo: JSONObject,
+        bizInfo: JSONObject? = null,
+    ): GameCenterPlayRpcCall.Contract? =
+        GameCenterPlayRpcCall.resolveContract(taskBaseInfo, bizInfo)
 
     private fun propList(allowReplenish: Boolean = true) {
         try {
@@ -1962,7 +1961,7 @@ class AntDodo : ModelTask() {
         private const val TASK_BLACKLIST_MODULE = "神奇物种"
         const val PERSISTENT_CHILD_KIND = "dodo_child_task"
         const val COLLECT_TO_FRIEND_CHILD_ID = "collect_to_friend"
-        private val BUSINESS_DRIVEN_TASK_TYPES = setOf("HELP_FRIEND_COLLECT", "SEND_FRIEND_CARD")
+        private val BUSINESS_DRIVEN_TASK_TYPES = setOf("HELP_FRIEND_COLLECT")
     }
 }
 

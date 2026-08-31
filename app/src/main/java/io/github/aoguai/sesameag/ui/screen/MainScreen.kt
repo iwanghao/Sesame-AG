@@ -28,6 +28,7 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -190,8 +191,7 @@ fun MainScreen(
                 onOpenFriendCenter = { user ->
                     openForUser(user) { id, name -> AppRoute.FriendCenter(id, name) }
                 },
-                onRemoveExecutableSlot = viewModel::removeExecutableAccountSlot,
-                onSelectLegacySlots = viewModel::selectLegacyAccountSlots,
+                onSetExecutableSlot = viewModel::setExecutableAccountSlot,
             )
         }
         entry<AppRoute.Logs> {
@@ -378,11 +378,7 @@ fun MainScreen(
             }
         },
     ) { modifier ->
-        if (isTopLevelRoute) {
-            Box(modifier.fillMaxSize()) {
-                selectedEntries.last().Content()
-            }
-        } else {
+        key(selected) {
             NavDisplay(
                 entries = selectedEntries,
                 modifier = modifier.fillMaxSize(),
