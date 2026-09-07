@@ -149,7 +149,7 @@ class ApplicationHook {
         if (!ModuleStatus.isSupportedLsposedFramework(framework, frameworkApiVersion)) {
             remotePreferences = null
             ModuleStatusReporter.updateNow(framework = framework, packageName = packageName, reason = "unsupported_libxposed_runtime")
-            record(TAG, "⛔ 检测到不受支持的 $framework 运行时 (API $frameworkApiVersion)，停止安装 Hook")
+            record(TAG, "⛔ 检测到不兼容的 Xposed 框架 (API $frameworkApiVersion)，停止安装 Hook")
             return
         }
 

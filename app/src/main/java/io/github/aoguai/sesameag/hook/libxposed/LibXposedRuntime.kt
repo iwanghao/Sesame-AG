@@ -44,7 +44,7 @@ internal class LibXposedRuntime(
             module.log(
                 Log.ERROR,
                 TAG,
-                "Unsupported runtime: $frameworkName API $apiVersion; requires LSPosed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
+                "Unsupported runtime: $frameworkName API $apiVersion; requires Xposed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
             )
             module.detach()
             return

@@ -139,15 +139,6 @@ object LsposedServiceManager {
             )
             return false
         }
-        if (!frameworkStatus.isSupportedLsposed) {
-            onFinished(
-                ScopeRequestResult(
-                    false,
-                    message = "Only official LSPosed is supported; current framework: ${frameworkStatus.frameworkName}"
-                )
-            )
-            return false
-        }
         val activeService = service ?: run {
             onFinished(ScopeRequestResult(false, message = "LSPosed service is not connected"))
             return false

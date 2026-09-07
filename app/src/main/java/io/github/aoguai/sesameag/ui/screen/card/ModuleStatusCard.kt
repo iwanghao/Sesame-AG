@@ -63,7 +63,7 @@ fun ModuleStatusCard(
     val title = when (status) {
         MainViewModel.ModuleStatus.Loading -> "正在检查模块"
         MainViewModel.ModuleStatus.NotActivated -> "模块未激活"
-        is MainViewModel.ModuleStatus.Unsupported -> "请使用受支持的 LSPosed"
+        is MainViewModel.ModuleStatus.Unsupported -> "框架不支持"
         is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块未激活"
         is MainViewModel.ModuleStatus.Activated -> "模块已激活"
     }
@@ -121,14 +121,13 @@ fun ModuleStatusCard(
                     Text("${status.frameworkName} ${status.frameworkVersion} · API ${status.apiVersion}", style = MaterialTheme.typography.bodySmall)
                     Text(
                         when (status.reason) {
-                            MainViewModel.ModuleStatus.UnsupportedReason.API_TOO_LOW -> "请更新至支持 API $MIN_SUPPORTED_LIBXPOSED_API 或更高版本的 LSPosed"
-                            MainViewModel.ModuleStatus.UnsupportedReason.NON_LSPOSED -> "请使用 LSPosed"
+                            MainViewModel.ModuleStatus.UnsupportedReason.API_TOO_LOW -> "请更新至支持 API $MIN_SUPPORTED_LIBXPOSED_API 或更高版本的 Xposed 框架"
                         },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                MainViewModel.ModuleStatus.NotActivated -> Text("等待 LSPosed 连接", style = MaterialTheme.typography.bodyMedium)
+                MainViewModel.ModuleStatus.NotActivated -> Text("等待 Xposed 框架连接", style = MaterialTheme.typography.bodyMedium)
                 MainViewModel.ModuleStatus.Loading -> Text("正在读取框架信息", style = MaterialTheme.typography.bodyMedium)
             }
             if (status is MainViewModel.ModuleStatus.NotActivated || status is MainViewModel.ModuleStatus.Unsupported) {
@@ -185,7 +184,7 @@ fun ModuleStatusCard(
         onDismissRequest = { showActivationSteps = false },
         onConfirm = onRefresh,
         title = "启用模块",
-        text = "LSPosed → 模块 → 芝麻粒 → 启用<br>作用域 → 目标应用",
+        text = "Xposed 框架管理器 → 模块 → 芝麻粒 → 启用<br>作用域 → 目标应用",
         confirmText = "重新检查",
         dismissText = "关闭",
     )

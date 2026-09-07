@@ -665,8 +665,8 @@ class MainActivity : ComponentActivity() {
                     ToastUtil.showToast(this, "已添加目标应用")
                 } else {
                     deniedPermissionsThisVisibility.add(PermissionRequirement.LSPOSED_TARGET_SCOPE)
-                    Log.runtime("MainActivity", "LSPosed scope request failed: ${result.message}")
-                    ToastUtil.showToast(this, "添加失败，请重试或在 LSPosed 中选择目标应用")
+                    Log.runtime("MainActivity", "Xposed scope request failed: ${result.message}")
+                    ToastUtil.showToast(this, "添加失败，请重试或在 Xposed 框架管理器中选择目标应用")
                 }
                 continuePermissionQueueOrAuto()
             }
