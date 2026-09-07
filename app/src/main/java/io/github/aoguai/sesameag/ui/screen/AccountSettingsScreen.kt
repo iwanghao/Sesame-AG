@@ -2,13 +2,17 @@ package io.github.aoguai.sesameag.ui.screen
 
 import android.app.Activity
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Checklist
@@ -50,6 +55,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Search
@@ -81,6 +87,7 @@ import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +104,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.entity.KVMap
@@ -106,6 +117,7 @@ import io.github.aoguai.sesameag.entity.friend.FriendRelationFilter
 import io.github.aoguai.sesameag.entity.friend.FriendSelectionCountSpec
 import io.github.aoguai.sesameag.entity.friend.FriendSelectionScope
 import io.github.aoguai.sesameag.entity.friend.FriendSelectionSpec
+import io.github.aoguai.sesameag.hook.ApplicationHookConstants
 import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceSwitchMeta
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TimeFieldMeta
@@ -120,15 +132,19 @@ import io.github.aoguai.sesameag.ui.viewmodel.FieldEditorUiModel
 import io.github.aoguai.sesameag.ui.viewmodel.FieldKey
 import io.github.aoguai.sesameag.ui.viewmodel.FieldOptionUiModel
 import io.github.aoguai.sesameag.ui.viewmodel.FieldOptionsState
+import io.github.aoguai.sesameag.ui.viewmodel.FriendRefreshCoordinator
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.friend.FriendRepository
 import io.github.aoguai.sesameag.util.friend.FriendSelectionResolver
+import io.github.aoguai.sesameag.util.maps.UserMap
 import io.github.aoguai.sesameag.util.settingsTransfer.SettingsTransferExportMode
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -137,7 +153,14 @@ private data object AccountModelListRoute : NavKey
 @Serializable
 private data class AccountModelDetailRoute(val modelCode: String) : NavKey
 
-private enum class AccountDialog { EXIT, IMPORT_OVERWRITE, EXPORT_MODE, DELETE_CONFIG }
+private enum class AccountDialog {
+    EXIT,
+    IMPORT_OVERWRITE,
+    EXPORT_MODE,
+    DELETE_CONFIG,
+    CLEAR_MODULE_TODAY_FLAGS,
+    CLEAR_FIELD_TODAY_FLAGS,
+}
 
 private data class SelectionRequest(
     val field: FieldEditorUiModel,
@@ -175,6 +198,8 @@ fun AccountSettingsScreen(
     var selectionFieldCode by rememberSaveable(userId) { mutableStateOf<String?>(null) }
     var friendModelCode by rememberSaveable(userId) { mutableStateOf<String?>(null) }
     var friendFieldCode by rememberSaveable(userId) { mutableStateOf<String?>(null) }
+    var pendingTodayFlagModuleCode by rememberSaveable(userId) { mutableStateOf<String?>(null) }
+    var pendingTodayFlagFieldCode by rememberSaveable(userId) { mutableStateOf<String?>(null) }
     var localMessage by rememberSaveable(userId) { mutableStateOf<String?>(null) }
 
     val selectionRequest = state.findField(selectionModelCode, selectionFieldCode)?.let(::selectionRequestFor)
@@ -426,6 +451,10 @@ fun AccountSettingsScreen(
                                     onSelectModel = {
                                         if (selectedModelCode != it) modelBackStack.add(AccountModelDetailRoute(it))
                                     },
+                                    onClearTodayFlags = { modelCode ->
+                                        pendingTodayFlagModuleCode = modelCode
+                                        activeDialog = AccountDialog.CLEAR_MODULE_TODAY_FLAGS
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -450,6 +479,11 @@ fun AccountSettingsScreen(
                                             friendFieldCode = it.key.fieldCode
                                         },
                                         onClearAudit = accountViewModel::clearFieldAudit,
+                                        onClearTodayFlags = { key ->
+                                            pendingTodayFlagModuleCode = key.modelCode
+                                            pendingTodayFlagFieldCode = key.fieldCode
+                                            activeDialog = AccountDialog.CLEAR_FIELD_TODAY_FLAGS
+                                        },
                                         onMessage = { localMessage = it },
                                         modifier = Modifier.fillMaxSize(),
                                     )
@@ -533,6 +567,48 @@ fun AccountSettingsScreen(
                 }
             },
         )
+        AccountDialog.CLEAR_MODULE_TODAY_FLAGS -> {
+            val model = pendingTodayFlagModuleCode?.let(state::findModel)
+            if (model != null) {
+                ConfirmDialog(
+                    title = "删除模块每日标识",
+                    message = "将删除“${model.name}”的全部每日标识和当日计数。",
+                    confirmText = "删除",
+                    danger = true,
+                    onDismiss = { activeDialog = null },
+                    onConfirm = {
+                        activeDialog = null
+                        scope.launch {
+                            localMessage = accountViewModel.clearModuleTodayFlags(context, model.code).fold(
+                                onSuccess = { it },
+                                onFailure = { it.message ?: "每日标识清除失败" },
+                            )
+                        }
+                    },
+                )
+            }
+        }
+        AccountDialog.CLEAR_FIELD_TODAY_FLAGS -> {
+            val field = state.findField(pendingTodayFlagModuleCode, pendingTodayFlagFieldCode)
+            if (field != null) {
+                ConfirmDialog(
+                    title = "删除字段每日标识",
+                    message = "将删除“${field.name}”当前显示的每日标识。",
+                    confirmText = "删除",
+                    danger = true,
+                    onDismiss = { activeDialog = null },
+                    onConfirm = {
+                        activeDialog = null
+                        scope.launch {
+                            localMessage = accountViewModel.clearFieldTodayFlags(context, field.key).fold(
+                                onSuccess = { it },
+                                onFailure = { it.message ?: "每日标识清除失败" },
+                            )
+                        }
+                    },
+                )
+            }
+        }
         null -> Unit
     }
 
@@ -555,12 +631,14 @@ fun AccountSettingsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModelList(
     state: AccountSettingsUiState,
     listState: LazyListState,
     selectedModelCode: String?,
     onSelectModel: (String) -> Unit,
+    onClearTodayFlags: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -602,7 +680,10 @@ private fun ModelList(
                             Text("已修改", color = MaterialTheme.colorScheme.primary)
                         }
                     },
-                    modifier = Modifier.clickable { onSelectModel(model.code) },
+                    modifier = Modifier.combinedClickable(
+                        onClick = { onSelectModel(model.code) },
+                        onLongClick = { onClearTodayFlags(model.code) },
+                    ),
                     colors = androidx.compose.material3.ListItemDefaults.colors(
                         containerColor = if (model.code == selectedModelCode) {
                             MaterialTheme.colorScheme.secondaryContainer
@@ -627,6 +708,7 @@ private fun ModelFields(
     onOpenSelection: (SelectionRequest) -> Unit,
     onOpenFriendSelection: (FieldEditorUiModel) -> Unit,
     onClearAudit: (FieldKey) -> Unit,
+    onClearTodayFlags: (FieldKey) -> Unit,
     onMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -652,6 +734,7 @@ private fun ModelFields(
                 onOpenFriendSelection = { onOpenFriendSelection(field) },
                 auditClearPending = field.key in state.pendingAuditClearKeys,
                 onClearAudit = { onClearAudit(field.key) },
+                onClearTodayFlags = { onClearTodayFlags(field.key) },
                 onRunAction = {
                     scope.launch {
                         onMessage(
@@ -668,6 +751,7 @@ private fun ModelFields(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FieldEditor(
     field: FieldEditorUiModel,
@@ -678,10 +762,33 @@ private fun FieldEditor(
     onOpenFriendSelection: () -> Unit,
     auditClearPending: Boolean,
     onClearAudit: () -> Unit,
+    onClearTodayFlags: () -> Unit,
     onRunAction: () -> Unit,
 ) {
+    val hasTodayFlag = field.todayClearableFlagKeys.isNotEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(field.name, style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = if (hasTodayFlag) {
+                Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = onClearTodayFlags,
+                )
+            } else {
+                Modifier
+            },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(field.name, style = MaterialTheme.typography.titleMedium)
+            if (hasTodayFlag) {
+                Icon(
+                    imageVector = Icons.Outlined.History,
+                    contentDescription = "长按删除${field.name}的每日标识",
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
         if (field.desc.isNotBlank()) {
             Text(field.desc, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -1131,7 +1238,80 @@ private fun FriendSelectionEditorScreen(
     var editExclusions by rememberSaveable(field.key.modelCode, field.key.fieldCode) { mutableStateOf(false) }
     var search by rememberSaveable(field.key.modelCode, field.key.fieldCode) { mutableStateOf("") }
     var showExitDialog by rememberSaveable(field.key.modelCode, field.key.fieldCode) { mutableStateOf(false) }
-    val friendConfig = remember(userId) { FriendRepository.current(userId) }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val refreshScope = rememberCoroutineScope()
+    val friendRefreshCoordinator = remember(userId) {
+        FriendRefreshCoordinator(refreshScope).also { it.bindUser(userId) }
+    }
+    val refreshState by friendRefreshCoordinator.state.collectAsStateWithLifecycle()
+    var friendConfig by remember(userId) { mutableStateOf(FriendRepository.current(userId)) }
+    var friendConfigGeneration by remember(userId) { mutableStateOf(0) }
+
+    fun reloadFriendConfig() {
+        val generation = friendConfigGeneration + 1
+        friendConfigGeneration = generation
+        refreshScope.launch {
+            val refreshedConfig = withContext(Dispatchers.IO) {
+                UserMap.setCurrentUserId(userId)
+                UserMap.load(userId)
+                FriendRepository.mergeFromUserMap(userId, allowPruneMissing = true)
+                FriendRepository.current(userId)
+            }
+            if (generation == friendConfigGeneration) {
+                friendConfig = refreshedConfig
+            }
+        }
+    }
+
+    LaunchedEffect(userId) {
+        reloadFriendConfig()
+        friendRefreshCoordinator.requestRefreshAvailability(context)
+    }
+
+    DisposableEffect(lifecycleOwner, userId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                reloadFriendConfig()
+                friendRefreshCoordinator.requestRefreshAvailability(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(context, userId) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    ApplicationHookConstants.BroadcastActions.HOOK_READY_RESULT -> {
+                        friendRefreshCoordinator.handleRefreshAvailabilityResult(
+                            resultUserId = intent.getStringExtra("userId").orEmpty(),
+                            ready = intent.getBooleanExtra("ready", false),
+                            message = intent.getStringExtra("message").orEmpty(),
+                        )
+                    }
+
+                    ApplicationHookConstants.BroadcastActions.REFRESH_FRIENDS_RESULT -> {
+                        val completion = friendRefreshCoordinator.handleRefreshResult(
+                            resultUserId = intent.getStringExtra("userId").orEmpty(),
+                            success = intent.getBooleanExtra("success", false),
+                            message = intent.getStringExtra("message").orEmpty(),
+                            profiles = intent.getIntExtra("profiles", 0),
+                            groups = intent.getIntExtra("groups", 0),
+                        )
+                        if (completion?.success == true) reloadFriendConfig()
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(ApplicationHookConstants.BroadcastActions.HOOK_READY_RESULT)
+            addAction(ApplicationHookConstants.BroadcastActions.REFRESH_FRIENDS_RESULT)
+        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
 
     fun selection(): FriendSelectionSpec = FriendSelectionSpec(
         selectionScope = scopeValue,
@@ -1179,6 +1359,21 @@ private fun FriendSelectionEditorScreen(
                     }
                 },
                 actions = {
+                    val refreshEnabled = refreshState.refreshAvailable &&
+                        !refreshState.checkingRefreshAvailability &&
+                        !refreshState.refreshing
+                    val refreshDescription = when {
+                        refreshState.refreshing -> "正在刷新好友"
+                        refreshState.checkingRefreshAvailability -> "正在检测目标应用"
+                        !refreshState.refreshAvailable -> "请先打开目标应用并回到模块，再刷新好友列表"
+                        else -> "刷新好友"
+                    }
+                    IconButton(
+                        onClick = { friendRefreshCoordinator.requestRefresh(context) },
+                        enabled = refreshEnabled,
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = refreshDescription)
+                    }
                     SettingsSaveIconButton(
                         isDirty = isDirty,
                         contentDescription = "保存好友选择",
@@ -1196,7 +1391,16 @@ private fun FriendSelectionEditorScreen(
                 .imePadding()
         ) {
             if (maxWidth >= 840.dp) {
-                Row(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize()) {
+                    if (refreshState.lastRefreshMessage.isNotBlank()) {
+                        Text(
+                            refreshState.lastRefreshMessage,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth().weight(1f)) {
                     FriendRuleEditor(
                         stateKey = "${field.key.modelCode}\u0000${field.key.fieldCode}",
                         friendConfig = friendConfig,
@@ -1232,12 +1436,22 @@ private fun FriendSelectionEditorScreen(
                         modifier = Modifier.width(340.dp).fillMaxHeight(),
                         scrollable = true,
                     )
+                    }
                 }
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (refreshState.lastRefreshMessage.isNotBlank()) {
+                        item {
+                            Text(
+                                refreshState.lastRefreshMessage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     item {
                         FriendRuleEditor(
                             stateKey = "${field.key.modelCode}\u0000${field.key.fieldCode}",
