@@ -244,6 +244,11 @@ object Log {
     }
 
     @JvmStatic
+    fun forestPatrol(msg: String) {
+        business(LogChannel.FOREST_PATROL, msg)
+    }
+
+    @JvmStatic
     fun orchard(msg: String) {
         business(LogChannel.ORCHARD, msg)
     }
@@ -292,11 +297,6 @@ object Log {
     @JvmStatic
     fun mybank(msg: String) {
         business(LogChannel.MYBANK, msg)
-    }
-
-    @JvmStatic
-    fun fishpond(msg: String) {
-        business(LogChannel.FISHPOND, msg)
     }
 
     @JvmStatic
