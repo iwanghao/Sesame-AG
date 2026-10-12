@@ -20,7 +20,6 @@ private val sesameCreditDefaultBlacklist =
         "zml_zmzl_xdrw_erfang", // pushActivity 返回 ILLEGAL_ARGUMENT，需真实租赁下单
         "zml_tbbbnc_shifei_sanfang", // pushActivity 返回 ILLEGAL_ARGUMENT，需真实淘宝行为
         "zmxy_zml_wannengxiaozujian", // pushActivity 返回 ILLEGAL_ARGUMENT，需真实桌面组件行为
-        "zml_cainiao_guojiang_sanfang", // pushActivity 返回 ILLEGAL_ARGUMENT，需真实菜鸟行为
         "zml_tbqd_qiandao_sanfang", // 需要淘宝签到结果
         "zml_xiangjiangshikaipao_renwu", // 需要游戏内任务事件
         "zml_longjizhicheng_renwu", // pushActivity 返回 promiseActivityExtCheck 非法，需游戏内任务事件
@@ -28,6 +27,7 @@ private val sesameCreditDefaultBlacklist =
         "zml_baoweixiangrikui_renwu", // 需要游戏内任务事件
         "zml_jihewangguo_renwu", // 需要游戏内任务事件
         "zml_xundaodaqian_renwu", // 砍伐30次的游戏事件，pushActivity返回ILLEGAL_ARGUMENT
+        "zm_WckGYybV_kUm3oyT1", // 砍伐20次的游戏事件，pushActivity返回ILLEGAL_ARGUMENT
         "AP16358996", // EVENT_TRIGGER：几何王国通过3关，直接send返回20020012
         "AP17359071", // EVENT_TRIGGER：灵画师消耗30包子，直接send返回20020012
     )
@@ -38,8 +38,6 @@ private val sesameAlchemyDefaultBlacklist =
         "hjwf_zcylt_zhuanhua",
         "hjwf_eduka_renwu",
         "alchemy_check_in_subscribe_task", // joinActivity 返回 PROMISE_TEMPLATE_NOT_EXIST
-        "hjwf_tbqd_qiandao_sanfang",
-        "hjwf_tbbbnc_shifei_sanfang",
         "hjwf_xiangjiangshikaipao_renwu", // 游戏事件不能由pushActivity完成，返回ILLEGAL_ARGUMENT
         "hjwf_zcylt_chongzhi", // 真实充值不能由pushActivity完成，返回ILLEGAL_ARGUMENT
         "hjwf_langmancanting_renwu", // 完成3个订单的游戏事件，pushActivity返回ILLEGAL_ARGUMENT
@@ -49,10 +47,10 @@ private val sesameAlchemyDefaultBlacklist =
 private val orchardDefaultBlacklist =
     setOf(
         // 芭芭农场
-        "ORCHARD_NORMAL_DIAOYU1", // 钓鱼1次
         "ZHUFANG3IN1", // 添加农场小组件并访问
         "70000|逛好物最高得1500肥料", // XLight广告流量风控，缺少稳定自动闭环
         "12173", // 买好货
+        "104283", // “抢”农货得120000肥料，需要真实下单
         "TOUTIAO|逛一逛今日头条", // 精确匹配旧今日头条任务，避免误伤趣头条任务
         "ORCHARD_NORMAL_JIUYIHUISHOU_VISIT", // 旧衣服回收
         "ORCHARD_NORMAL_SHOUJISHUMAHUISHOU", // 数码回收
@@ -72,8 +70,6 @@ private val orchardDefaultBlacklist =
         "CHOUCHOULE_GAME_WDHYSJ_ZH", // 居民订单不可由普通 finishDrawTask 完成，返回 400000040
         "CHOUCHOULE_GAME_WDHYSJ_CHARGE", // 需真实充值，finishDrawTask 返回 400000040
         "ORCHARD_NORMAL_GAODE_VISIT|去高德发表真实评价", // finishTask 返回 400000040，不支持rpc调用
-        "ORCHARD_NORMAL_SHANGOUMIANDAN|逛一逛淘宝闪购", // finishTask 返回 400000040，不支持rpc调用
-        "ORCHARD_NORMAL_TAOBAOTAOLIPAI_VISIT|逛一逛淘宝拍照", // 不支持rpc调用
         "ORCHARD_NORMAL_TAOBAO26_618|去淘金币赢20亿", // 不支持rpc调用，缺少稳定完成RPC闭环
         "ORCHARD_NORMAL_BAIDU_DUO", // 去百度浏览资讯
         "ORCHARD_NORMAL_XIANXIAZHIFU100", // 到店支付1笔得100肥
@@ -109,6 +105,12 @@ private val farmDefaultBlacklist =
         // 蚂蚁庄园
         "HEART_DONATION_ADVANCED_FOOD_V2", // 茉莉雪梨卷任务
         "HEART_DONATE", // 爱心捐赠
+        "MYZY_pay_rcccl_jhwg", // 游戏充值得10次抽抽乐机会，需真实支付
+        "MYZY_pay_IPccl_jhwg", // 游戏充值得10次抽抽乐机会，需真实支付
+        "MYZY_pay_rcccl_fkssj", // 游戏充值并消费，需真实支付
+        "MYZY_pay_IPccl_fkssj", // 游戏充值并消费，需真实支付
+        "antfarm_pay_task_wdhysj_ccl", // 游戏充值得10次抽抽乐机会，需真实支付
+        "ipccl_pay_ah_wdhy_ahsj_1y_ah", // 游戏充值得10次抽抽乐机会，需真实支付
         "20251118_chouchoulechoukuan2|伸出援手，点亮希望", // 装扮抽抽乐公益捐赠任务
         "innerAction:DONATION", // 装扮抽抽乐公益捐赠任务动作
         "categorizationSecondLevel:Public_Welfare_Behavior", // 装扮抽抽乐公益行为分类
@@ -116,6 +118,7 @@ private val farmDefaultBlacklist =
         "desc:单笔捐赠", // 装扮抽抽乐捐赠换机会任务描述
         "targetUrl:donationSubject", // 装扮抽抽乐公益捐赠专题页
         "SHANGOU_xiadan", // 逛闪购外卖1元起吃
+        "LSHS_xiadan_202509", // 完成1笔旧衣回收，需要真实回收订单
         "OFFLINE_PAY", // 到店付款
         "ONLINE_PAY", // 线上支付
         "HUABEI_MAP_180", // 用花呗完成一笔支付
@@ -191,7 +194,6 @@ private val forestDefaultBlacklist =
         "ENERGY_XUANJIAO_ditiechuxing地铁出行",
         "ENERGY_XUANJIAO_guangpanxingdong光盘行动",
         "ENERGY_XUANJIAO_dianzizhifu电子支付",
-        "FOREST_CONTINUOUS_COLLECT_ENERGY_7连续7天收自己能量",
         "LSHS_huisho20_202508", // 完成旧衣回收得能量
         "YUSHU_202511", // 单种榆树，年年有榆
         "KTKZ_YS202511", // 一起组团种榆树
@@ -245,6 +247,7 @@ private val stallDefaultBlacklist =
         "ANTSTALL_TASK_XCXYX_langmancanting", // 需要完成游戏订单，普通finishTask返回400000040
         "ANTSTALL_TASK_XCXYX_qingyunjue", // 需要游戏内闯关事件，普通finishTask返回400000040
         "ANTSTALL_TASK_XCXYX_sijiwuyu", // 需要游戏内合成事件，普通finishTask返回400000040
+        "ANTSTALL_TASK_XCXYX_yibuliangbu", // 需要游戏内通关事件，普通finishTask返回400000040
     )
 
 private val yuebaoDefaultBlacklist =
@@ -362,6 +365,10 @@ private val youthPrivilegeDefaultBlacklist =
 private val sportsDefaultBlacklist =
     setOf(
         // 运动
+        "AP19300602", // 添加支付宝小组件
+        "AP11258305", // 医疗健康添加首页任务
+        "STEP_STETLEMENT_TASK", // 步数满1000
+        "DURATION_STETLEMENT_TASK", // 锻炼30分钟
         "玩游戏",
         // 签名/设计类广告任务：finishAdTask 返回 304/TASK_NOT_FINISHED
         "AP17300472",
@@ -384,6 +391,7 @@ private val myBankWelfareDefaultBlacklist =
         "AP12341521", // 查看借呗额度：需真实授信业务行为
         "AP18353629", // 办理全国大流量卡：需真实办理业务
         "AP12333795", // 完成1笔借呗支用：需真实借款支用行为
+        "AP18374962", // 领取网商贷备用金：事件规则明确拒绝通用send（10000005）
     )
 
 val DEFAULT_BLACKLIST: Map<String, Set<String>> =

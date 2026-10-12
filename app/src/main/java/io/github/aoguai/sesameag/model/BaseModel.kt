@@ -1,11 +1,18 @@
 package io.github.aoguai.sesameag.model
 
+import io.github.aoguai.sesameag.entity.MapperEntity
 import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField.MultiplyIntegerModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TimePointListModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TimeWindowListModelField
+import io.github.aoguai.sesameag.task.antDodo.AntDodo
+import io.github.aoguai.sesameag.task.antStall.AntStall
+import io.github.aoguai.sesameag.task.greenFinance.GreenFinance
+import io.github.aoguai.sesameag.task.myBankWelfare.MyBankWelfare
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.maps.BeachMap
@@ -39,6 +46,8 @@ class BaseModel : Model() {
         modelFields.addField(offlineCooldown) // 离线冷却时间
         modelFields.addField(taskExecutionRounds) // 轮数
         modelFields.addField(taskMaxConcurrency) // 任务并发数
+        modelFields.addField(taskOrderMode)
+        modelFields.addField(taskOrderPriority)
         modelFields.addField(taskTimeout) // 单任务超时时间
         modelFields.addField(modelSleepTime) // 模块休眠时间范围
         modelFields.addField(execAtTimeList) // 定时执行的时间点列表
@@ -57,13 +66,14 @@ class BaseModel : Model() {
         modelFields.addField(sendHookData) // 启用Hook数据转发
         modelFields.addField(sendHookDataUrl) // Hook数据转发地址
 
-        modelFields.addField(batteryPerm) // 是否申请模块电池优化豁免
+        modelFields.addField(batteryPerm) // 是否检查模块电池优化豁免
         modelFields.addField(recordLog) // 是否记录record日志
         modelFields.addField(runtimeLog) // 是否记录runtime日志
         modelFields.addField(showToast) // 是否显示气泡提示
         modelFields.addField(enableOnGoing) // 是否开启状态栏禁删
         modelFields.addField(languageSimplifiedChinese) // 是否只显示中文并设置时区
         modelFields.addField(toastPerfix) // 气泡提示的前缀
+        modelFields.addField(defaultCityCode) // 城市定位失败时的默认城市代码
         return modelFields
     }
 
@@ -75,6 +85,14 @@ class BaseModel : Model() {
         }
     }
 
+    interface TaskOrderMode {
+        companion object {
+            const val RANDOM = 0
+            const val MANUAL = 1
+            val nickNames = arrayOf("每轮随机", "手动优先级")
+        }
+    }
+
     companion object {
         private const val TAG = "BaseModel"
 
@@ -83,7 +101,7 @@ class BaseModel : Model() {
          */
         val stayAwake: BooleanModelField =
             BooleanModelField("stayAwake", "保持唤醒", false).withDesc(
-                "开启后，模块只在任务到期执行窗口短时保持 CPU 唤醒；长时间等待仍依赖系统闹钟或进程内计时。",
+                "为主任务和程序计时的执行窗口申请 CPU 唤醒锁，不控制屏幕常亮；关闭后，持久子任务和定时广播仍保留必要短锁。",
             )
 
         /**
@@ -114,7 +132,7 @@ class BaseModel : Model() {
                 0,
                 24 * 60,
                 60000,
-            ).withDesc("触发网络异常或离线熔断后的冷却时长；填 0 时跟随执行间隔，并受最小保护时间限制。")
+            ).withDesc("用于离线恢复判断的冷却时长；0 跟随执行间隔，至少 3 分钟。到期不自动解除离线，需完成验证或处理异常后返回目标应用。")
 
         /**
          * 离线执行开关
@@ -138,6 +156,36 @@ class BaseModel : Model() {
             IntegerModelField("taskMaxConcurrency", "任务并发数", 2, 1, 3).withDesc(
                 "控制每个批次最多同时运行的任务协程数；默认 2，调高会增加请求频率和风控概率。",
             )
+
+        // 仅末批这些模块可交换位置；依赖原因及固定模块见 TaskRunner.buildExecutionBatches。
+        internal val taskOrderModelClasses: Set<Class<out Model>> = setOf(
+            AntStall::class.java,
+            AntDodo::class.java,
+            GreenFinance::class.java,
+            MyBankWelfare::class.java,
+        )
+
+        val taskOrderMode: ChoiceModelField = ChoiceModelField(
+            "taskOrderMode", "同批模块顺序", TaskOrderMode.RANDOM, TaskOrderMode.nickNames,
+        ).withDesc("仅调整同批可独立执行模块的入队顺序；默认每轮随机，也可设置手动优先级。")
+
+        val taskOrderPriority: SelectAndCountModelField = SelectAndCountModelField(
+            "taskOrderPriority",
+            "模块顺序",
+            linkedMapOf(),
+            SelectAndCountModelField.SelectListFunc {
+                Model.modelArray.filterNotNull()
+                    .filter { it.javaClass in taskOrderModelClasses }
+                    .map { model ->
+                        object : MapperEntity() {
+                            init {
+                                id = model.javaClass.simpleName
+                                name = model.getName().orEmpty()
+                            }
+                        }
+                    }
+            },
+        ).withDesc("手动优先级模式生效：正整数越小越先入队；未设置的模块随后入队，同值保持原序。并发执行不保证完成顺序。")
 
         /**
          * 单任务超时时间（分钟）
@@ -205,15 +253,15 @@ class BaseModel : Model() {
             ).withDesc("命中该时间段时暂停常规任务执行。")
 
         /**
-         * 定时任务模式选择
+         * 辅助等待模式选择
          */
         val timedTaskModel: ChoiceModelField =
             ChoiceModelField(
                 "timedTaskModel",
-                "定时任务模式",
+                "辅助等待模式",
                 TimedTaskModel.Companion.SYSTEM,
                 TimedTaskModel.Companion.nickNames,
-            ).withDesc("控制进程存活时的等待策略：系统计时使用普通协程等待；程序计时使用进程内等待并在执行窗口短时唤醒，不保证进程被杀后仍执行。")
+            ).withDesc("仅控制辅助等待：系统计时使用普通协程等待；程序计时在开启保持唤醒后为执行窗口申请短锁。轮询、定时唤醒和持久子任务不随此选项切换调度方式。")
 
         /**
          * 超时是否重启
@@ -284,11 +332,11 @@ class BaseModel : Model() {
             )
 
         /**
-         * 是否申请模块自身的电池优化豁免
+         * 是否检查模块自身的电池优化豁免
          */
         val batteryPerm: BooleanModelField =
-            BooleanModelField("batteryPerm", "申请模块电池优化豁免", false).withDesc(
-                "打开模块界面时检查并按标准 Android 流程申请模块自身的忽略电池优化权限；自动调度链路只读取状态并在缺失时降级，不会主动跳转授权页。",
+            BooleanModelField("batteryPerm", "检查模块电池优化豁免", false).withDesc(
+                "初始化时检查模块的电池优化豁免，缺失时记录日志；授权请通过模块首页的权限卡手动申请。",
             )
 
         /**
@@ -318,6 +366,14 @@ class BaseModel : Model() {
         val toastPerfix: StringModelField =
             StringModelField("toastPerfix", "气泡前缀", "").withDesc(
                 "气泡提示前置文本，非空时会拼接在每条提示前。",
+            )
+
+        /**
+         * 默认城市代码（城市定位失败时的兑底）
+         */
+        val defaultCityCode: StringModelField =
+            StringModelField("defaultCityCode", "默认城市代码", "").withDesc(
+                "城市定位失败时使用的默认城市代码（如 330100=杭州），留空则先尝试最近一次成功定位的城市；均不可用时跳过城市相关子任务。",
             )
 
         /**

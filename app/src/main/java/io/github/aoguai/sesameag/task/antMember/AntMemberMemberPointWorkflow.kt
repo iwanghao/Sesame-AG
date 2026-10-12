@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withLock
 
 internal data class AntMemberPointWorkflowPlan(
     val claimTaskAwards: Boolean,
@@ -42,15 +43,13 @@ internal fun AntMember.prepareMemberPointWorkflows(
     if ((memberSign?.value == true || memberTask?.value == true) &&
         !hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)
     ) {
-        deferredTasks.add(scope.async(Dispatchers.IO) { doMemberGameEntrance() })
+        deferredTasks.add(scope.async(Dispatchers.IO) {
+            memberFloatingBallMutex.withLock { doMemberGameEntrance() }
+        })
     }
 
     if (yebExpGold?.value == true) {
         deferredTasks.add(scope.async(Dispatchers.IO) { handleYebExpGoldTasks() })
-    }
-
-    if (memberPointExchangeBenefit?.value == true) {
-        deferredTasks.add(scope.async(Dispatchers.IO) { memberPointExchangeBenefit() })
     }
 
     return plan
@@ -75,5 +74,8 @@ internal suspend fun AntMember.finishMemberPointWorkflows(plan: AntMemberPointWo
             Log.member("🎯 会员流程执行完成，开始统一领取会员积分")
             AntMember.queryPointCert(1, 20)
         }
+    }
+    if (memberPointExchangeBenefit?.value == true && !ApplicationHookConstants.isOffline()) {
+        memberPointExchangeBenefit()
     }
 }

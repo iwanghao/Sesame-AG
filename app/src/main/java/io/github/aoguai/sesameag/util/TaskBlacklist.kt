@@ -77,19 +77,17 @@ object TaskBlacklist {
     fun isTaskInBlacklist(
         moduleName: String?,
         taskInfo: String?,
-    ): Boolean {
-        if (moduleName.isNullOrBlank() || taskInfo.isNullOrBlank()) return false
+    ): Boolean = findMatch(moduleName, taskInfo) != null
 
-        // 1. 检查内置黑名单
+    /** 返回实际命中条目及存储来源，供任务流记录一次诊断。 */
+    fun findMatch(moduleName: String?, taskInfo: String?): Pair<String, String>? {
+        if (moduleName.isNullOrBlank() || taskInfo.isNullOrBlank()) return null
         relatedModuleNames(moduleName).forEach { name ->
-            DEFAULT_BLACKLIST[name]?.let { defaultSet ->
-                if (defaultSet.any { isMatch(taskInfo, it) }) return true
+            DEFAULT_BLACKLIST[name]?.firstOrNull { isMatch(taskInfo, it) }?.let {
+                return "内置" to it
             }
         }
-
-        // 2. 检查持久化存储的黑名单
-        val moduleBlacklist = getBlacklist(moduleName)
-        return moduleBlacklist.any { isMatch(taskInfo, it) }
+        return getBlacklist(moduleName).firstOrNull { isMatch(taskInfo, it) }?.let { "持久" to it }
     }
 
     /**
@@ -191,7 +189,6 @@ object TaskBlacklist {
                 "PROMISE_TEMPLATE_NOT_EXIST", "生活记录模板不存在" -> "模板不存在"
                 "FAKE_SUCCESS" -> "检测到伪成功"
                 "AD_TRAFFIC_RISK", "217", "61002" -> "广告流量风控"
-                "UNSUPPORTED_GAMEPLAY_TASK" -> "无稳定自动完成RPC闭环"
                 else -> return
             }
 

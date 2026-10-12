@@ -194,6 +194,7 @@ class AccountSettingsViewModel(
 
     fun exchangeTargetFor(key: FieldKey): String? = when (key) {
         FieldKey("AntMember", "memberPointExchangeBenefitList") -> ExchangeOptionsRefreshBridge.TARGET_MEMBER_POINT
+        FieldKey("AntMember", "billCoinExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_BILL_COIN
         FieldKey("AntMember", "beanExchangeRightList") -> ExchangeOptionsRefreshBridge.TARGET_BEAN_RIGHT
         FieldKey("MyBankWelfare", "myBankWelfareExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_MYBANK_WELFARE
         FieldKey("AntFarm", "paradiseCoinExchangeBenefitList") -> ExchangeOptionsRefreshBridge.TARGET_FARM_PARADISE
@@ -201,6 +202,7 @@ class AccountSettingsViewModel(
         FieldKey("AntSports", "sportsEnergyExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_SPORTS_ENERGY
         FieldKey("AntForest", "vitalityExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_FOREST_VITALITY
         FieldKey("AntSesameCredit", "sesameGrainExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_SESAME_GRAIN
+        FieldKey("GoldenBeanTreasure", "goldenBeanMallExchangeList") -> ExchangeOptionsRefreshBridge.TARGET_GOLDEN_BEAN_MALL
         else -> null
     }
 

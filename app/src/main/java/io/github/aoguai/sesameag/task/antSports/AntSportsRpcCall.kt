@@ -1,7 +1,10 @@
 package io.github.aoguai.sesameag.task.antSports
 
+import android.util.Base64
+
 import io.github.aoguai.sesameag.entity.RpcEntity
 import io.github.aoguai.sesameag.hook.RequestManager
+import io.github.aoguai.sesameag.hook.internal.LocationHelper
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -51,6 +54,11 @@ object AntSportsRpcCall {
     private const val CITY_CODE = "330100"
 
     private const val SPORTS_WALK_SOURCE = "ch_othertinyapp"
+
+    /**
+     * @brief 路线推荐页来源 - 真实页面查询推荐路线列表使用的渠道标识
+     */
+    private const val SPORTS_RECOMMEND_SOURCE = "medical_health"
 
     /**
      * @brief 功能特性列表 - JSON 格式字符串
@@ -222,7 +230,7 @@ object AntSportsRpcCall {
         val body =
             JSONObject().apply {
                 put("bizType", MOTION_QUIZ_BIZ_TYPE)
-                put("cityCode", CITY_CODE)
+                put("cityCode", LocationHelper.getCityCodeOrNull() ?: CITY_CODE)
                 put("queryDate", queryDate)
                 put("queryVersion", 2)
                 put("scene", "single_day")
@@ -267,10 +275,12 @@ object AntSportsRpcCall {
                 put("bizType", MOTION_QUIZ_BIZ_TYPE)
                 put("quizId", quizId)
             }
-        return requestMotionQuizChannelData(
-            "answer_quiz_award",
-            "2025081410521001",
-            body,
+        return RequestManager.requestString(
+            "alipay.iblib.channel.flow",
+            JSONArray().put(JSONObject()
+                .put("body", body)
+                .put("stepflowCode", "query_quiz_prizes_new")
+                .put("version", "2.0")).toString(),
         )
     }
 
@@ -289,6 +299,70 @@ object AntSportsRpcCall {
             "2025102200108020",
             body,
         )
+    }
+
+    fun queryFactcheckQuestionnaireIndex(lifecycleId: String): String = RequestManager.requestString(
+        "com.alipay.factcheck.questionnaireIndex",
+        JSONArray().put(JSONObject()
+            .put("businessTypeEnum", "APPLET")
+            .put("extInfo", JSONObject().put("lifecycleId", lifecycleId))
+            .put("previewDate", System.currentTimeMillis())
+            .put("source", "factcheck")).toString(),
+    )
+
+    fun startFactcheckQuestionnaire(question: JSONObject, lifecycleId: String): String {
+        val content = JSONObject(question.toString()).apply {
+            remove("index")
+            put("sourceMethod", "factchek")
+        }
+        val message = JSONObject().put("chunkId", 0).put("hasNext", false).put("turn", 0)
+            .put("contents", JSONArray().put(JSONObject()
+                .put("content", Base64.encodeToString(content.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
+                .put("lastPack", false).put("packNo", 0)))
+        return RequestManager.requestString("com.alipay.factcheck.questionnaire", JSONArray().put(JSONObject()
+            .put("businessTypeEnum", "APPLET")
+            .put("extInfo", JSONObject().put("lifecycleId", lifecycleId))
+            .put("previewDate", System.currentTimeMillis()).put("source", "factcheck")
+            .put("messageInfo", message)).toString())
+    }
+
+    fun submitFactcheckAnswer(question: JSONObject, context: JSONObject, questionNo: Int, lifecycleId: String): String {
+        val session = context.getJSONObject("sessionInfo")
+        val content = JSONObject(question.toString()).apply {
+            put("userAnswer", question.getString("certType"))
+            put("sessionId", session.getString("sessionId"))
+            put("index", questionNo)
+            put("sourceMethod", "factchek")
+        }
+        val message = JSONObject().put("chatId", context.getJSONObject("messageInfo").getString("chatId"))
+            .put("chunkId", 0).put("hasNext", false).put("turn", 0)
+            .put("contents", JSONArray().put(JSONObject()
+                .put("content", Base64.encodeToString(content.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
+                .put("lastPack", false).put("packNo", 0)))
+        return RequestManager.requestString("com.alipay.factcheck.submitAnswer", JSONArray().put(JSONObject()
+            .put("businessTypeEnum", "APPLET")
+            .put("extInfo", JSONObject().put("lifecycleId", lifecycleId))
+            .put("previewDate", System.currentTimeMillis()).put("source", "factcheck")
+            .put("messageInfo", message).put("sessionInfo", session)
+            .put("streamInfo", context.getJSONObject("streamInfo"))).toString())
+    }
+
+    fun collectFactcheckEnergy(question: JSONObject, context: JSONObject, bubbleId: String, lifecycleId: String): String {
+        val session = context.getJSONObject("sessionInfo")
+        val content = JSONObject().put("contentId", question.getString("contentId"))
+            .put("title", question.getString("title")).put("userId", session.getString("userId"))
+            .put("bubbleId", bubbleId)
+        val message = JSONObject().put("hasNext", false).put("protocolVersion", "2.0").put("turn", 666)
+            .put("contents", JSONArray().put(JSONObject()
+                .put("content", Base64.encodeToString(content.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
+                .put("contentEncoding", "json").put("contentType", "energy")
+                .put("lastPack", false).put("packNo", 1)))
+        return RequestManager.requestString("com.alipay.factcheck.collectEnergy", JSONArray().put(JSONObject()
+            .put("businessTypeEnum", "APPLET")
+            .put("extInfo", JSONObject().put("lifecycleId", lifecycleId))
+            .put("previewDate", System.currentTimeMillis()).put("source", "factcheck")
+            .put("messageInfo", message).put("sessionInfo", session)
+            .put("streamInfo", context.getJSONObject("streamInfo"))).toString())
     }
 
     /**
@@ -591,6 +665,15 @@ object AntSportsRpcCall {
         return RequestManager.requestString("com.alipay.sportsplay.biz.rpc.walk.queryUser", data)
     }
 
+    fun queryThemeList(): String = RequestManager.requestString(
+        "com.alipay.sportsplay.biz.rpc.walk.theme.queryThemeList", "[{}]",
+    )
+
+    fun queryWorldMap(themeId: String): String = RequestManager.requestString(
+        "com.alipay.sportsplay.biz.rpc.walk.queryWorldMap",
+        JSONArray().put(JSONObject().put("themeId", themeId)).toString(),
+    )
+
     /**
      * @brief 查询城市路线 - 新版
      *
@@ -676,6 +759,21 @@ object AntSportsRpcCall {
         RequestManager.requestString(
             "com.alipay.sportsplay.biz.rpc.walk.queryPath",
             """[{"chInfo":"$SPORTS_WALK_SOURCE","clientOS":"android","date":"$date","enableNewVersion":true,"features":$FEATURES,"pathId":"$pathId","timeZone":"$TIME_ZONE"}]""",
+        )
+
+    /**
+     * @brief 查询推荐路线列表 - 当前路线完成后真实页面换图使用的推荐接口
+     *
+     * @param pathId 当前路线ID
+     *
+     * @return RPC调用结果的 JSON 字符串
+     *
+     * @remark 对应API：com.alipay.sportsplay.biz.rpc.walk.queryRecommendPathList
+     */
+    fun queryRecommendPathList(pathId: String): String =
+        RequestManager.requestString(
+            "com.alipay.sportsplay.biz.rpc.walk.queryRecommendPathList",
+            """[{"chInfo":"$SPORTS_RECOMMEND_SOURCE","clientOS":"android","features":$FEATURES,"pathId":"$pathId"}]""",
         )
 
     /**
@@ -819,7 +917,7 @@ object AntSportsRpcCall {
     fun userTaskGroupQuery(groupId: String): String =
         RequestManager.requestString(
             "alipay.tiyubiz.sports.userTaskGroup.query",
-            """[{"cityCode":"$CITY_CODE","groupId":"$groupId"}]""",
+            """[{"cityCode":"${LocationHelper.getCityCodeOrNull() ?: CITY_CODE}","groupId":"$groupId"}]""",
         )
 
     /**
@@ -838,7 +936,7 @@ object AntSportsRpcCall {
     ): String =
         RequestManager.requestString(
             "alipay.tiyubiz.sports.userTask.complete",
-            """[{"bizType":"$bizType","cityCode":"$CITY_CODE","completedTime":${System.currentTimeMillis()},"taskId":"$taskId"}]""",
+            """[{"bizType":"$bizType","cityCode":"${LocationHelper.getCityCodeOrNull() ?: CITY_CODE}","completedTime":${System.currentTimeMillis()},"taskId":"$taskId"}]""",
         )
 
     /**
@@ -1396,6 +1494,15 @@ object AntSportsRpcCall {
     object NeverlandRpcCall {
         private const val DEFAULT_SOURCE = "ch_toufang__yundongshouye"
 
+        fun offlineAward(): String = RequestManager.requestString(
+            "com.alipay.neverland.biz.rpc.offlineAward", "[{\"isAdvertisement\":true}]",
+        )
+
+        fun receiveSpecialPrize(sceneType: String): String = RequestManager.requestString(
+            "com.alipay.neverland.biz.rpc.receiveSpecialPrize",
+            JSONArray().put(JSONObject().put("sceneType", sceneType)).toString(),
+        )
+
         /**
          * @brief 查询签到状态
          *
@@ -1441,10 +1548,13 @@ object AntSportsRpcCall {
          *
          * @remark 对应API：com.alipay.neverland.biz.rpc.queryBubbleTask
          */
-        fun queryBubbleTask(source: String = DEFAULT_SOURCE): String =
+        fun queryBubbleTask(source: String? = DEFAULT_SOURCE): String =
             RequestManager.requestString(
                 NEVERLAND_QUERY_BUBBLE_TASK_RPC,
-                """[{"source":"$source","sportsAuthed":true}]""",
+                JSONArray().put(JSONObject().apply {
+                    if (source != null) put("source", source)
+                    put("sportsAuthed", true)
+                }).toString(),
             )
 
         private fun sportsItemMallFeatures(): JSONArray =
@@ -1507,7 +1617,7 @@ object AntSportsRpcCall {
                 JSONArray()
                     .put(
                         JSONObject().apply {
-                            put("chInfo", "xzyd1031")
+                            put("chInfo", "medical_health")
                             put("clientOS", "android")
                             put("features", sportsItemMallFeatures())
                             put("sceneId", "SPORT_ITEM_MALL")
@@ -1533,7 +1643,7 @@ object AntSportsRpcCall {
                         JSONObject().apply {
                             put("adSession", adSession)
                             put("categoryType", categoryType)
-                            put("chInfo", "xzyd1031")
+                            put("chInfo", "medical_health")
                             put("cityCode", cityCode)
                             put("clientOS", "android")
                             put("features", sportsItemMallFeatures())
@@ -1695,7 +1805,7 @@ object AntSportsRpcCall {
          */
         fun pickBubbleTaskEnergy(
             ids: List<String>,
-            source: String = DEFAULT_SOURCE,
+            source: String? = DEFAULT_SOURCE,
             pickAllEnergyBall: Boolean = true,
         ): String {
             val obj =
@@ -1707,7 +1817,7 @@ object AntSportsRpcCall {
                         },
                     )
                     put("pickAllEnergyBall", pickAllEnergyBall)
-                    put("source", source)
+                    if (source != null) put("source", source)
                 }
             val arr = JSONArray().put(obj)
             return RequestManager.requestString(

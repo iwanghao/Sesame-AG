@@ -2,7 +2,12 @@ package io.github.aoguai.sesameag.task.antFarm
 
 import io.github.aoguai.sesameag.hook.RequestManager
 import io.github.aoguai.sesameag.hook.RequestManager.requestString
+import io.github.aoguai.sesameag.task.common.DeferredReason
+import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
+import io.github.aoguai.sesameag.task.common.TaskRpcFailureType
+import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.util.RandomUtil.nextInt
 import org.json.JSONArray
 import org.json.JSONException
@@ -405,14 +410,35 @@ object AntFarmRpcCall {
         targetFarmId: String?,
         toolId: String?,
         toolType: String?,
+        achievementId: String? = null,
+        dollId: String? = null,
     ): String {
+        // 数字公仔补签卡使用时需指定补签目标
+        val supplementArgs =
+            if (!achievementId.isNullOrEmpty() && !dollId.isNullOrEmpty()) {
+                ",\"achievementId\":\"$achievementId\",\"dollId\":\"$dollId\""
+            } else {
+                ""
+            }
         val args1 =
             (
                 "[{\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"targetFarmId\":\"" +
-                    targetFarmId + "\",\"toolId\":\"" + toolId + "\",\"toolType\":\"" + toolType + "\",\"version\":\"" +
+                    targetFarmId + "\",\"toolId\":\"" + toolId + "\",\"toolType\":\"" + toolType + "\"" + supplementArgs +
+                    ",\"version\":\"" +
                     VERSION + "\"}]"
             )
         return requestString("com.alipay.antfarm.useFarmTool", args1)
+    }
+
+    /** 查询指定数字公仔的获得状态，响应含 dollInfoVO(acquired/achievementId) 与 dollTool 补签卡库存 */
+    @JvmStatic
+    fun queryAntfarmDoll(dollId: String?): String {
+        val args1 =
+            (
+                "[{\"dollId\":\"" + dollId + "\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"" +
+                    VERSION + "\"}]"
+            )
+        return requestString("com.alipay.antfarm.queryAntfarmDoll", args1)
     }
 
     @JvmStatic
@@ -687,15 +713,52 @@ object AntFarmRpcCall {
 
     // 日常任务
     @JvmStatic
-    fun doFarmTask(bizKey: String?): String =
+    @JvmOverloads
+    fun doFarmTask(bizKey: String?, taskSceneCode: String? = null, requestType: String = "NORMAL"): String =
         requestString(
             "com.alipay.antfarm.doFarmTask",
-            (
-                "[{\"bizKey\":\"" + bizKey +
-                    "\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"" +
-                    VERSION + "\"}]"
-            ),
+            JSONArray().put(JSONObject().apply {
+                put("bizKey", bizKey)
+                put("requestType", requestType)
+                put("sceneCode", "ANTFARM")
+                put("source", "H5")
+                put("version", VERSION)
+                if (!taskSceneCode.isNullOrBlank()) put("taskSceneCode", taskSceneCode)
+            }).toString(),
         )
+
+    fun doSceneTask(
+        bizKey: String,
+        taskSceneCode: String,
+        onFailure: (JSONObject) -> TaskFlowActionResult,
+    ): TaskFlowActionResult {
+        val rpc = "AntFarmRpcCall.doFarmTask"
+        val raw = doFarmTask(bizKey, taskSceneCode, "RPC")
+        val response = JsonUtil.parseJSONObjectOrNull(raw) ?: return TaskFlowActionResult.failure(
+            TaskRpcFailureType.RETRYABLE_RPC,
+            message = "场景任务请求返回空或无法解析",
+            rpc = rpc,
+            raw = raw,
+            continueCurrentRoundOnFailure = true,
+        ).copy(refreshAfterAction = true)
+        if (!ResChecker.checkRes(TAG, response)) {
+            val failure = onFailure(response).copy(rpc = rpc, raw = raw, refreshAfterAction = true)
+            if (failure.code == "1009" || failure.code == "331") {
+                return failure.copy(failureType = TaskRpcFailureType.BUSINESS_LIMIT)
+            }
+            // 该协议的 102 响应不能证明任务未推进，仍由所属列表确认。
+            if (failure.code != "102") return failure
+            Log.error(TAG, "场景任务待回查[$taskSceneCode/$bizKey] code=102 msg=${failure.message} raw=$raw")
+        }
+        return TaskFlowActionResult.defer(
+            DeferredReason.STATE_CONFIRMATION,
+            message = "场景任务请求已发送，等待所属任务列表确认",
+            rpc = rpc,
+            raw = raw,
+            detail = "taskSceneCode=$taskSceneCode bizKey=$bizKey",
+            refreshAfterAction = true,
+        )
+    }
 
     @JvmStatic
     fun queryTabVideoUrl(): String =

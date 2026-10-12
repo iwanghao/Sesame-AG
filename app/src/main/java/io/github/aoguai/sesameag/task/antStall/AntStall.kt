@@ -1,5 +1,7 @@
 package io.github.aoguai.sesameag.task.antStall
 
+import io.github.aoguai.sesameag.task.antFarm.AntFarmRpcCall
+
 import android.util.Base64
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
@@ -61,6 +63,7 @@ import java.util.concurrent.ConcurrentHashMap
 class AntStall : ModelTask() {
     private enum class StallTaskCompleteRoute {
         GAME_PLAY_DURATION,
+        BUSINESS_ACTION,
         FINISH,
         DAILY_QA,
         INVITE_REGISTER,
@@ -537,6 +540,10 @@ class AntStall : ModelTask() {
                 tc.countDebug("收金币")
             }
 
+            // 收肥料：先收回好友丢的肥料补充库存，再丢肥料才能最大化当日可丢量
+            collectManure()
+            tc.countDebug("收肥料")
+
             // 丢肥料
             if (stallThrowManure.value == true) {
                 throwManure()
@@ -548,10 +555,6 @@ class AntStall : ModelTask() {
             // 收取金币
             settle(seatsMap)
             tc.countDebug("收取金币")
-
-            // 收肥料
-            collectManure()
-            tc.countDebug("收肥料")
 
             // 请走操作
             sendBack(seatsMap)
@@ -1466,6 +1469,8 @@ class AntStall : ModelTask() {
                     blacklistKeys = listOf(taskType, taskTitle).filter { it.isNotBlank() },
                     raw = raw,
                     progress = "actionType=${actionType.ifBlank { "UNKNOWN" }} award=$awardCount",
+                    current = if (task.has("taskProgress") && !task.isNull("taskProgress")) task.optInt("taskProgress") else null,
+                    limit = if (task.has("taskRequire") && !task.isNull("taskRequire")) task.optInt("taskRequire") else null,
                 ),
             )
         }
@@ -1513,7 +1518,12 @@ class AntStall : ModelTask() {
             return when {
                 isStallRewardReadyStatus(item.status) -> TaskFlowPhase.REWARD_READY
                 isStallTerminalStatus(item.status) -> TaskFlowPhase.TERMINAL
-                isStallTodoStatus(item.status) -> TaskFlowPhase.READY_TO_COMPLETE
+                isStallTodoStatus(item.status) ->
+                    if (resolveStallTaskCompleteRoute(item) == StallTaskCompleteRoute.BUSINESS_ACTION) {
+                        TaskFlowPhase.BUSINESS_ACTION
+                    } else {
+                        TaskFlowPhase.READY_TO_COMPLETE
+                    }
                 else -> TaskFlowPhase.UNKNOWN
             }
         }
@@ -1524,6 +1534,9 @@ class AntStall : ModelTask() {
             }
 
             val phase = mapPhase(item)
+            if (phase == TaskFlowPhase.BUSINESS_ACTION) {
+                logStallTaskOnce("新村任务⛪[${item.title}]等待游戏业务完成确认，进度=${item.current ?: "未知"}/${item.limit}")
+            }
             if (phase == TaskFlowPhase.REWARD_READY && stallReceiveAward.value != true) {
                 logStallTaskOnce("新村任务⛪[${item.title}]已完成，未开启领奖，跳过领取")
                 return true
@@ -1560,6 +1573,11 @@ class AntStall : ModelTask() {
                 else -> {
                     when (resolveStallTaskCompleteRoute(item)) {
                         StallTaskCompleteRoute.GAME_PLAY_DURATION -> completeGamePlayDurationTask(item)
+                        StallTaskCompleteRoute.BUSINESS_ACTION -> TaskFlowActionResult.defer(
+                            DeferredReason.PREREQUISITE_PENDING,
+                            message = "等待游戏业务完成确认，进度=${item.current ?: "未知"}/${item.limit}",
+                            detail = stallTaskActionDetail(item, "business"),
+                        )
                         StallTaskCompleteRoute.DAILY_QA -> {
                             completeDailyQuestionTask(item)
                         }
@@ -2082,11 +2100,16 @@ class AntStall : ModelTask() {
         return if (isStallTaskRpcSuccess(json)) {
             completedStallTaskResult(item)
         } else {
-            stallTaskActionFailureResult(
+            val failure = stallTaskActionFailureResult(
                 response = json,
                 rpc = "AntStallRpcCall.finishTask",
                 detail = stallTaskActionDetail(item, "finishTask"),
             )
+            if (failure.code == "400000040") {
+                AntFarmRpcCall.doSceneTask(item.type, "ANTSTALL_TASK") { fallback ->
+                    stallTaskActionFailureResult(fallback, "AntFarmRpcCall.doFarmTask", stallTaskActionDetail(item, "finishTask"))
+                }
+            } else failure
         }
     }
 
@@ -2462,8 +2485,19 @@ class AntStall : ModelTask() {
             item.type == STALL_DAILY_QA_TASK_TYPE -> StallTaskCompleteRoute.DAILY_QA
             item.type == STALL_INVITE_REGISTER_TASK_TYPE -> StallTaskCompleteRoute.INVITE_REGISTER
             item.type == STALL_OPEN_SHOP_TASK_TYPE -> StallTaskCompleteRoute.OPEN_SHOP
-            stallGamePlayContract(item) != null -> StallTaskCompleteRoute.GAME_PLAY_DURATION
-            else -> StallTaskCompleteRoute.FINISH
+            else -> {
+                val descriptor = GameCenterPlayRpcCall.describeTask(item.raw)
+                val bizInfo = item.raw?.optJSONObject("bizInfo")
+                when {
+                    // 新村页面倒计时由原完成接口处理，不等同于游戏中心时长上报。
+                    descriptor.isGameTask && bizInfo?.optString("taskMode") == "COUNT_DOWN" &&
+                        (bizInfo?.optInt("countDownSeconds") ?: 0) > 0 -> StallTaskCompleteRoute.FINISH
+                    descriptor.contract != null -> StallTaskCompleteRoute.GAME_PLAY_DURATION
+                    item.actionType == "VISIT_AUTO_FINISH" -> StallTaskCompleteRoute.FINISH
+                    descriptor.isGameTask && (item.limit ?: 0) > 0 -> StallTaskCompleteRoute.BUSINESS_ACTION
+                    else -> StallTaskCompleteRoute.FINISH
+                }
+            }
         }
 
     private fun isDynamicXLightTask(item: TaskFlowItem): Boolean {

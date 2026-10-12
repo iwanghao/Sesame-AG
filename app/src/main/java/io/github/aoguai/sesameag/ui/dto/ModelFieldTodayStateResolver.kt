@@ -120,7 +120,9 @@ object ModelFieldTodayStateResolver {
                 flag(StatusFlags.FLAG_ANTMEMBER_MEMBER_SIGN_DONE, "今日会员签到已处理")
             }
 
-            "AntMember.memberTask" -> {
+            "AntMember.memberTask",
+            "AntMember.memberSignPageTask",
+            "AntMember.memberSignInAdTask" -> {
                 when {
                     Status.hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY) -> {
                         inactive("今日会员任务已处理")
@@ -342,6 +344,19 @@ object ModelFieldTodayStateResolver {
                 flag(StatusFlags.FLAG_GOLDEN_BEAN_TASKS_DONE, "今日金豆夺宝任务已处理")
             }
 
+            "GoldenBeanTreasure.goldenBeanMallExchange",
+            "GoldenBeanTreasure.goldenBeanMallExchangeList",
+            -> {
+                val selected = countMapValue(modelFields["goldenBeanMallExchangeList"])
+                if (selected.isNotEmpty() && selected.all { (id, limit) ->
+                        limit > 0 && (Status.getIntFlagToday(StatusFlags.FLAG_GOLDEN_BEAN_MALL_EXCHANGE_COUNT_PREFIX + id) ?: 0) >= limit
+                    }) {
+                    inactive("今日所选商品规格已达兑换次数")
+                } else {
+                    ModelFieldTodayState()
+                }
+            }
+
             "GoldenBeanTreasure.goldenBeanManureExchangeDailyReserveAmount" -> {
                 limitReached(
                     current = Status.getIntFlagToday(StatusFlags.FLAG_GOLDEN_BEAN_MANURE_EXCHANGE_AMOUNT),
@@ -430,12 +445,6 @@ object ModelFieldTodayStateResolver {
 
             "AntFarm.donation" -> {
                 farmDonationState()
-            }
-
-            "OtherTask.credit2101",
-            "OtherTask.CreditOptions",
-            -> {
-                credit2101OptionsState(modelFields["CreditOptions"] ?: modelField)
             }
 
             else -> {
@@ -555,32 +564,6 @@ object ModelFieldTodayStateResolver {
             ModelFieldTodayState()
         }
     }
-
-    private fun credit2101OptionsState(modelField: ModelField<*>): ModelFieldTodayState {
-        val configuredCounts =
-            countMapValue(modelField)
-                .filterValues { it != 0 }
-        if (configuredCounts.isEmpty()) {
-            return ModelFieldTodayState()
-        }
-        if (configuredCounts.values.any { it < 0 }) {
-            return ModelFieldTodayState()
-        }
-
-        return if (configuredCounts.all { (eventType, limit) ->
-                (Status.getIntFlagToday(buildCredit2101EventCountFlag(eventType)) ?: 0) >= limit
-            }
-        ) {
-            inactive("今日信用2101事件已达设定次数")
-        } else {
-            ModelFieldTodayState()
-        }
-    }
-
-    private fun buildCredit2101EventCountFlag(eventType: String): String =
-        StatusFlags.FLAG_CREDIT2101_EVENT_COUNT_PREFIX +
-            eventType +
-            StatusFlags.FLAG_CREDIT2101_EVENT_COUNT_SUFFIX
 
     private fun hasFlagTodayWithPrefix(flagPrefix: String): Boolean {
         val index = flagPrefix.indexOf("::")
