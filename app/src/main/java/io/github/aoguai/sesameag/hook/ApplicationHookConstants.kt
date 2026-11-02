@@ -59,8 +59,32 @@ object ApplicationHookConstants {
     var offline: Boolean = false
         private set
 
+    // --------------------------------------------------------------------
+    // 离线执行开关（offlineExecution）
+    // 语义：开关开启时会照常记录离线状态、事件与通知（风控提示不丢失），但允许任务与 RPC 继续执行。
+    // 因此对外暴露两级判断：
+    //   - isOffline()     : “工作流是否应被离线阻断”，受开关影响
+    //   - isOfflineRaw()  : “是否真的处于离线状态”，不受开关影响（用于事件/日志/状态上报）
+    // 注意：auth_like（滑块/验证）属硬风控，见 isHardBlockedRpc()，不受开关放行。
+    // --------------------------------------------------------------------
+
+    /**
+     * 离线执行开关当前是否开启。直接读取内存配置字段，无需缓存。
+     */
     @JvmStatic
-    fun isOffline(): Boolean = offline
+    fun isOfflineExecutionEnabled(): Boolean = BaseModel.offlineExecution.value == true
+
+    /**
+     * 是否处于“原始”离线状态（忽略离线执行开关）。用于事件记录、状态上报与风控快照。
+     */
+    @JvmStatic
+    fun isOfflineRaw(): Boolean = offline
+
+    /**
+     * 工作流是否应被离线阻断。开启离线执行开关时恒为 false。
+     */
+    @JvmStatic
+    fun isOffline(): Boolean = offline && !isOfflineExecutionEnabled()
 
     @Volatile
     var offlineUntilMs: Long = 0L
@@ -115,6 +139,8 @@ object ApplicationHookConstants {
         val method: String,
         val code: String,
         val message: String,
+        /** 离线执行开关是否开启；开启时 active 仍为 true，但 RPC 会被硬封锁。 */
+        val offlineExecution: Boolean = false,
     )
 
     private const val OFFLINE_EVENT_MAX = 64
@@ -194,6 +220,7 @@ object ApplicationHookConstants {
             method = extractOfflineMethod(detail),
             code = extractOfflineDetailValue(detail, "code", "msg", "reason"),
             message = extractOfflineDetailValue(detail, "msg", "reason"),
+            offlineExecution = isOfflineExecutionEnabled(),
         )
     }
 
@@ -236,12 +263,18 @@ object ApplicationHookConstants {
         )
 
         if (!wasOffline) {
-            val runningMainTask = ApplicationHook.mainTask
-            if (runningMainTask?.isRunning == true) {
-                record(TAG, "offline entered, stop current mainTask to pause workflow")
-                runningMainTask.stopTask()
+            val executionAllowed = isOfflineExecutionEnabled()
+            if (executionAllowed) {
+                // 离线执行开关开启：保留离线标记与事件，但不中断正在执行的工作流。
+                record(TAG, "offline entered but offlineExecution enabled, keep running workflow")
+            } else {
+                val runningMainTask = ApplicationHook.mainTask
+                if (runningMainTask?.isRunning == true) {
+                    record(TAG, "offline entered, stop current mainTask to pause workflow")
+                    runningMainTask.stopTask()
+                }
+                stopAllTask()
             }
-            stopAllTask()
             // 离线/风控发生时实时通知用户（含滑块验证 auth_like），补齐“风控无感知”缺口。
             if (BaseModel.errNotify.value == true) {
                 val title =
@@ -251,11 +284,20 @@ object ApplicationHookConstants {
                         "network_error_threshold" -> "网络异常次数超过阈值，已暂停"
                         else -> "模块已进入离线，已暂停"
                     }
-                runCatching {
-                    io.github.aoguai.sesameag.util.Notify.sendAlert(
-                        title,
-                        detail?.takeIf { it.isNotBlank() } ?: "请打开目标应用完成验证或查看错误日志",
-                    )
+                if (executionAllowed) {
+                    runCatching {
+                        io.github.aoguai.sesameag.util.Notify.sendAlert(
+                            "检测到风控/验证（离线执行中）",
+                            detail?.takeIf { it.isNotBlank() } ?: "离线执行已开启，任务继续运行，请及时处理验证",
+                        )
+                    }
+                } else {
+                    runCatching {
+                        io.github.aoguai.sesameag.util.Notify.sendAlert(
+                            title,
+                            detail?.takeIf { it.isNotBlank() } ?: "请打开目标应用完成验证或查看错误日志",
+                        )
+                    }
                 }
             }
         }
@@ -336,8 +378,24 @@ object ApplicationHookConstants {
         ModuleStatusReporter.requestUpdate("offline_exit")
     }
 
+    /**
+     * RPC 统一 gating 点。
+     *
+     * 与 [isOffline] 的差异：
+     * - [isOffline] 表达“工作流是否该停”，受离线执行开关影响；
+     * - 本方法表达“这条 RPC 是否该发”，在离线执行开关之外额外尊重硬风控封锁。
+     *
+     * 硬封锁指 auth_like（滑块/验证）未解除：此类状态下继续发请求会显著提高账号风险，
+     * 即使开启离线执行也不放行，避免开关被当成“风控豁免”。
+     */
     @JvmStatic
-    fun shouldBlockRpc(): Boolean = offline
+    fun shouldBlockRpc(): Boolean = offline && (isHardBlockedRpc() || !isOfflineExecutionEnabled())
+
+    /**
+     * 是否为硬风控离线（滑块/验证）。离线执行开关对此无效。
+     */
+    @JvmStatic
+    fun isHardBlockedRpc(): Boolean = offline && offlineReason == "auth_like"
 
     enum class TriggerPriority(
         val weight: Int,

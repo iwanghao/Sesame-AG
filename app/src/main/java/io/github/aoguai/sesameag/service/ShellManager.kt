@@ -97,8 +97,15 @@ class ShellManager(context: Context) {
             if (!isShizukuReady() || !shell.isAvailable()) {
                 false
             } else {
+                // Shizuku 授权后以 shell/adb 身份执行（常见 UID 2000），并非必然是 root。
+                // 只要命令通道可用且返回合法 UID，即视为可用执行器。
                 val result = shell.exec("/system/bin/id -u", 5_000L)
-                result.isSuccess && result.stdout.trim() == "0"
+                val uid = result.stdout.trim()
+                val usable = result.isSuccess && uid.isNotEmpty() && uid.all { it.isDigit() }
+                if (usable) {
+                    Log.d(TAG, "Shizuku 执行身份确认: uid=$uid")
+                }
+                usable
             }
         } else {
             shell.isAvailable()
@@ -106,9 +113,14 @@ class ShellManager(context: Context) {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        Log.w(TAG, "Root 执行身份确认失败: ${e.message}")
+        Log.w(TAG, "执行身份确认失败: ${e.message}")
         false
     }
+
+    /**
+     * 当前 Shizuku 是否已授权且服务在线（不要求 root 身份）。
+     */
+    fun isShizukuGranted(): Boolean = isShizukuReady()
 
     suspend fun refreshSelection(notifyUnavailable: Boolean = true): String {
         selectExecutor(notifyUnavailable)

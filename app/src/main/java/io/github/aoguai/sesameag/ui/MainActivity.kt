@@ -334,7 +334,15 @@ class MainActivity : ComponentActivity() {
                     onBackup = { backupLauncher.launch("sesame-backup-${System.currentTimeMillis()}.zip") },
                     onRestore = { confirmStorageRestore.value = true },
                     onAuthorize = { requestPermissionFromCard(PermissionRequirement.SHELL_EXECUTOR) },
-                    onExit = ::finish,
+                    // “稍后处理”：写入跳过标记并以空白配置直接进入主界面，不再拦截启动。
+                    onExit = {
+                        lifecycleScope.launch {
+                            runCatching { withContext(Dispatchers.IO) { PrivateStorage.skipMigration() } }
+                                .onFailure {
+                                    ToastUtil.showToast(this@MainActivity, "跳过迁移失败：${it.message}")
+                                }
+                        }
+                    },
                 )
                 if (!storageState.ready) return@AppTheme
                 MainScreen(
