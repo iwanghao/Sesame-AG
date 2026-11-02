@@ -1,5 +1,6 @@
 package io.github.aoguai.sesameag.task.EcoProtection
 
+
 import android.net.Uri
 import io.github.aoguai.sesameag.data.Status.Companion.ancientTreeToday
 import io.github.aoguai.sesameag.data.Status.Companion.canAncientTreeToday
@@ -13,7 +14,6 @@ import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.reserve.ReserveRpcCall
-import io.github.aoguai.sesameag.util.GlobalThreadPools.sleepCompat
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
 import org.json.JSONObject
@@ -165,7 +165,6 @@ class EcoProtection : ModelTask() {
                 for (cityCode in ancientTreeCityCodeList) {
                     if (!canAncientTreeToday(cityCode)) continue
                     ancientTreeProtect(cityCode)
-                    sleepCompat(1000L)
                 }
             } catch (th: Throwable) {
                 Log.printStackTrace(TAG, "ancientTree err:",th)
@@ -188,7 +187,6 @@ class EcoProtection : ModelTask() {
                         val districtInfo = districtBriefInfo.getJSONObject("districtInfo")
                         val districtCode = districtInfo.getString("districtCode")
                         districtDetail(districtCode)
-                        sleepCompat(1000L)
                     }
                     ancientTreeToday(cityCode)
                 }
@@ -232,7 +230,6 @@ class EcoProtection : ModelTask() {
                                 val protectExpense = ancientTreeInfo.getInt("protectExpense")
                                 cityCode = ancientTreeInfo.getString("cityCode")
                                 if (currentEnergy < protectExpense) break
-                                sleepCompat(200)
                                 jo = JSONObject(EcoProtectionRpcCall.protect(activityId, projectId, cityCode))
                                 if (ResChecker.checkRes(TAG, jo)) {
                                     Log.forest(
@@ -248,7 +245,6 @@ class EcoProtection : ModelTask() {
                             Log.forest(jo.getString("resultDesc"))
                             Log.forest(ancientTreeDetail.toString())
                         }
-                        sleepCompat(500L)
                     }
                 }
             } catch (th: Throwable) {

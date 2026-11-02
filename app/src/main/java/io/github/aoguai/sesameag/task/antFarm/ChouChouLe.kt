@@ -1,5 +1,6 @@
 package io.github.aoguai.sesameag.task.antFarm
 
+
 import android.net.Uri
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
@@ -24,7 +25,6 @@ import io.github.aoguai.sesameag.task.exchange.ExchangeOptionsSnapshot
 import io.github.aoguai.sesameag.task.exchange.ExchangeSafety
 import io.github.aoguai.sesameag.task.exchange.ExchangeSafetyRules
 import io.github.aoguai.sesameag.util.Files
-import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
@@ -274,10 +274,9 @@ class ChouChouLe {
                 override fun receive(item: TaskFlowItem): TaskFlowActionResult =
                     receiveTaskAward(drawType, currentTasks.getValue(item.id))
 
-                override fun onQueryFailed(response: JSONObject) = Log.error(TAG, "$flowName 查询失败:$response")
                 override fun logInfo(message: String) = Log.farm(message)
                 override fun logError(message: String) = Log.error(TAG, message)
-            }, roundSleepMs = 300L).run().completed
+            }, roundSleepMs = 255L).run().completed
         } catch (t: Throwable) {
             val taskName = if (drawType == "ipDraw") "IP抽抽乐" else "日常抽抽乐"
             Log.printStackTrace("doChouchoule err:", t)
@@ -460,7 +459,6 @@ class ChouChouLe {
         if (!ResChecker.checkRes(TAG, response)) {
             return farm.buildFarmTaskFailureResult(response, task.taskId, task.title, "完成", "doFarmTask")
         }
-        GlobalThreadPools.sleepCompat(1000L)
         return TaskFlowActionResult.success(progressChanged = false)
     }
 
@@ -496,9 +494,9 @@ class ChouChouLe {
         task: TaskInfo,
         renderConfigKey: String?,
     ): TaskFlowActionResult {
-        if (renderConfigKey != null && !waitForRenderTaskDuration(drawType, task, renderConfigKey)) {
+        if (renderConfigKey != null && !queryRenderTask(drawType, task, renderConfigKey)) {
             return TaskFlowActionResult.failure(
-                TaskRpcFailureType.RETRYABLE_RPC, message = "广告时长查询未确认，原响应已记录",
+                TaskRpcFailureType.RETRYABLE_RPC, message = "广告查询未确认，原响应已记录",
                 rpc = "adTaskApplayerQuery", continueCurrentRoundOnFailure = true,
             )
         }
@@ -506,20 +504,18 @@ class ChouChouLe {
         return finishTaskDirectly(drawType, task, taskSceneCode)
     }
 
-    private fun waitForRenderTaskDuration(
+    private fun queryRenderTask(
         drawType: String,
         task: TaskInfo,
         renderConfigKey: String,
     ): Boolean {
         val response = AntFarmRpcCall.adTaskApplayerQuery(renderConfigKey)
         val result = JSONObject(response)
-        val durationSeconds = result.optJSONObject("resultData")?.optDouble("duration", -1.0) ?: -1.0
-        if (!result.optBoolean("success") || result.optString("errCode") != "0" || durationSeconds <= 0.0) {
+        if (!result.optBoolean("success") || result.optString("errCode") != "0") {
             val taskName = if (drawType == "ipDraw") "IP抽抽乐" else "抽抽乐"
-            Log.error(TAG, "${taskName}任务[${task.title}]广告时长查询未确认：$result")
+            Log.error(TAG, "${taskName}任务[${task.title}]广告查询未确认：$result")
             return false
         }
-        GlobalThreadPools.sleepCompat((durationSeconds * 1000.0).toLong())
         return true
     }
 
@@ -599,9 +595,6 @@ class ChouChouLe {
                         return false
                     }
                     remainingTimes = afterTimes
-                    if (remainingTimes > 0) {
-                        GlobalThreadPools.sleepCompat(1500L)
-                    }
                 }
             }
             if (activityId.isNotEmpty() && AntFarm.instance?.autoExchange?.value == true) {
@@ -668,9 +661,6 @@ class ChouChouLe {
                     return false
                 }
                 remainingTimes = afterTimes
-                if (remainingTimes > 0) {
-                    GlobalThreadPools.sleepCompat(1500L)
-                }
             }
             return allSuccess
         } catch (t: Throwable) {
@@ -854,7 +844,6 @@ class ChouChouLe {
                         break
                     }
 
-                    GlobalThreadPools.sleepCompat(800L)
                     val beforeExchangeItem = currentItem
                     val refreshedSnapshot = runCatching {
                         loadIpDrawMallSnapshot(IpDrawActivity(activityId, endTime), liveRead = true)

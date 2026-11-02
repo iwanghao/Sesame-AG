@@ -23,6 +23,7 @@ import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleDefaults
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleKind
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleRegistry
 import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
+import io.github.aoguai.sesameag.hook.rpc.intervallimit.FixedOrRangeIntervalLimit
 import io.github.aoguai.sesameag.hook.rpc.intervallimit.RpcIntervalLimit.addIntervalLimit
 import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.ModelGroup
@@ -87,8 +88,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import io.github.aoguai.sesameag.util.SerialTaskQueue
+
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -106,7 +107,7 @@ private const val SPECIAL_FOOD_USE_FARM_FOOD_RPC = "com.alipay.antfarm.useFarmFo
 class AntFarm : ModelTask() {
     internal var ownerFarmId: String? = null
     private val farmTaskBlacklistModule = "蚂蚁庄园"
-    private val farmWorkflowMutex = Mutex()
+    private val farmWorkflowQueue = SerialTaskQueue()
     private var farmTaskExecutionState = TaskFlowExecutionState()
     internal val farmWorkAttempted = mutableSetOf<String>()
     private val farmAwardNoProgressIds = mutableSetOf<String>()
@@ -320,11 +321,17 @@ class AntFarm : ModelTask() {
     // 雇佣NPC
     internal var npcAnimalType: ChoiceModelField? = null
     // NPC配置定义
-    private enum class NpcConfig(val animalId: String, val source: String, val nickName: String) {
+    private enum class NpcConfig(
+        val animalId: String,
+        val source: String,
+        val nickName: String,
+        val taskSceneCode: String = "",
+    ) {
         NONE("", "", "关闭"),
-        ZHIMA_PIGEON("20250901105101013088000000000006", "zhimaxiaoji_lianjin", "芝麻大表鸽"),
+        ZHIMA_PIGEON("20250901105101013088000000000006", "zhimaxiaoji_lianjin", "芝麻大表鸽", "ANTFARM_ZHIMA_NPC_TASK"),
         GOLD_CHICKEN("20250725105101013088000000000004", "licaixiaoji_2025_1", "黄金鸡"),
-        FARM_CHICKEN("20250613105101013088000000000002", "feiliaoji_202507", "农场小鸡");
+        FARM_CHICKEN("20250613105101013088000000000002", "feiliaoji_202507", "农场小鸡"),
+        TAOJINBI_CHICKEN("202609201051013088000000000018", "H5", "淘金币小鸡", "ANTFARM_TAOJINBI_NPC_TASK");
 
         companion object {
             val nickNames: Array<String> by lazy {
@@ -426,7 +433,7 @@ class AntFarm : ModelTask() {
                 "雇佣NPC小鸡(满产自动重雇)",
                 NpcConfig.NONE.ordinal,
                 NpcConfig.nickNames
-            ).withDesc("选择自动雇佣并在满产后重雇的 NPC 小鸡；选“关闭”则不处理。").also {
+            ).withDesc("选择自动雇佣并在满产后重雇的 NPC 小鸡；选“关闭”仅停止自动雇佣和重雇，仍处理已在场 NPC 的任务与奖励。").also {
                 npcAnimalType = it
             })
         modelFields.addField(BooleanModelField(
@@ -888,10 +895,10 @@ modelFields.addField(
     override fun boot(classLoader: ClassLoader?) {
         super.boot(classLoader)
         instance = this
-        addIntervalLimit("com.alipay.antfarm.enterFarm", 2000)
+        addIntervalLimit("com.alipay.antfarm.enterFarm", FixedOrRangeIntervalLimit("1700-2000", 1700, 2000))
     }
 
-    override suspend fun runSuspend() = farmWorkflowMutex.withLock {
+    override suspend fun runSuspend() = farmWorkflowQueue.submit {
         try {
             val tc = TimeCounter(TAG)
             val userId = UserMap.currentUid
@@ -904,7 +911,7 @@ modelFields.addField(
             manurePotBelowThresholdReported.clear()
 
             if (!runFarmLifecycleWorkflow(tc)) {
-                return@withLock
+                return@submit
             }
             val pendingFarmTaskFinalization = runFarmTaskWorkflow(tc, userId)
             val pendingFarmTaskFinalizationAfterSocial = runFarmSocialWorkflow(tc, pendingFarmTaskFinalization)
@@ -1112,17 +1119,16 @@ modelFields.addField(
             userDataStore.put(ZHIMA_PIGEON_REWARD_ROUND_KEY, java.util.UUID.randomUUID().toString())
             userDataStore.put(ZHIMA_PIGEON_REWARD_RECEIPT_KEY, "")
         }
-        Status.removeFlag(StatusFlags.FLAG_SESAME_ALCHEMY_TASKS_DONE)
         return userDataStore.get(ZHIMA_PIGEON_REWARD_RECEIPT_KEY, String::class.java) != null
     }
 
-    internal suspend fun confirmZhimaPigeonDeparture(): Boolean = farmWorkflowMutex.withLock {
-        if (ownerFarmId.isNullOrBlank() && enterFarm() == null) return@withLock false
+    internal suspend fun confirmZhimaPigeonDeparture(): Boolean = farmWorkflowQueue.submit {
+        if (ownerFarmId.isNullOrBlank() && enterFarm() == null) return@submit false
         val config = NpcConfig.ZHIMA_PIGEON
-        val current = syncNpcAnimalStatus(config.source, "SYNC_PIGEON_REWARD") ?: return@withLock false
-        val pigeon = current.find(config.animalId) ?: return@withLock true
+        val current = syncNpcAnimalStatus(config.source, "SYNC_PIGEON_REWARD") ?: return@submit false
+        val pigeon = current.find(config.animalId) ?: return@submit true
         checkNpcReward(pigeon, config)
-        val refreshed = syncNpcAnimalStatus(config.source, "SYNC_PIGEON_DEPARTURE") ?: return@withLock false
+        val refreshed = syncNpcAnimalStatus(config.source, "SYNC_PIGEON_DEPARTURE") ?: return@submit false
         refreshed.find(config.animalId) == null
     }
 
@@ -1146,9 +1152,14 @@ modelFields.addField(
             return false
         }
         userDataStore.remove(ZHIMA_PIGEON_REWARD_ROUND_KEY)
-        Status.removeFlag(StatusFlags.FLAG_SESAME_ALCHEMY_TASKS_DONE)
-        Status.removeFlag(StatusFlags.FLAG_FARM_ZHIMA_PIGEON_HIRE_DONE)
-        Log.farm("芝麻大表鸽🤖[88芝麻粒已领取并回查确认，等待炼金列表确认后续雇佣资格]")
+        // 产出轮次结束只清理该轮待收记录，不改变炼金日任务和雇佣任务的完成事实。
+        if (isZhimaPigeonConfigured()) {
+            deferFarmWork("zhimaPigeon", System.currentTimeMillis() + 1000L)
+            scheduleFarmPendingWork()
+            Log.farm("芝麻大表鸽🤖[88芝麻粒已领取并回查确认，已交由庄园调度续雇]")
+        } else {
+            Log.farm("芝麻大表鸽🤖[88芝麻粒已领取并回查确认]")
+        }
         return true
     }
 
@@ -1300,20 +1311,20 @@ modelFields.addField(
         source: String,
         ownerUserId: String,
         sessionEpoch: Long
-    ) = farmWorkflowMutex.withLock {
+    ) = farmWorkflowQueue.submit {
         if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) {
             Log.farm("庄园持久子任务[$group][$childId]会话已切换，取消执行: owner=$ownerUserId session=$sessionEpoch")
-            return@withLock
+            return@submit
         }
         if (!isEnable() || !check() || ApplicationHookConstants.isOffline()) {
             Log.farm("庄园子任务[$group]当前受全局执行限制，留待自然调度")
-            return@withLock
+            return@submit
         }
         if (group == "LC") {
             val current = PersistentScheduleRegistry.list().firstOrNull {
                 it.dedupeKey == persistentFarmDedupeKey(childId)
-            } ?: return@withLock
-            if (current.triggerAtMs != payload.optLong("trigger_at")) return@withLock
+            } ?: return@submit
+            if (current.triggerAtMs != payload.optLong("trigger_at")) return@submit
             // 内存与持久唤醒可能同时到期；在庄园互斥锁内消费这一个计划。
             loveChickenChildTask?.cancel()
             loveChickenChildTask = null
@@ -1325,16 +1336,17 @@ modelFields.addField(
         invalidToolTypesThisRound.clear()
         val entered = enterFarm()
         currentCoroutineContext().ensureActive()
-        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) return@withLock
+        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) return@submit
         if (entered == null) {
             if (group == "LC" && !ApplicationHookConstants.isOffline()) {
+                // 爱心鸡任务进入庄园失败后延后十分钟重新唤醒，避免入口异常时立即反复请求；不阻塞当前流程。
                 val retryAt = System.currentTimeMillis() + 10 * 60_000L
                 registerPersistentChildTask(childId, group, retryAt, JSONObject(payload.toString()).put("trigger_at", retryAt))
             }
-            return@withLock
+            return@submit
         }
         val farmId = payload.optString("farm_id")
-        if (farmId.isBlank() || farmId != ownerFarmId) return@withLock
+        if (farmId.isBlank() || farmId != ownerFarmId) return@submit
         Log.farm("庄园持久子任务触发[$group][$childId] source=$source")
         when (group) {
             "AS" -> runSleepChildTask()
@@ -1347,7 +1359,7 @@ modelFields.addField(
             "FD" -> runDueFarmWork()
             else -> Log.farm("未知庄园持久子任务[$group][$childId]，跳过")
         }
-        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) return@withLock
+        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) return@submit
         refreshFarmFeedingSchedule()
         scheduleFarmPendingWork()
     }
@@ -1356,7 +1368,6 @@ modelFields.addField(
         val sleepAt = configuredFarmSleepTime() ?: return
         if (System.currentTimeMillis() < sleepAt) return
         if (!isOwnerAnimalSleeping()) {
-            runFarmResourceWork(includeGames = false)
             animalSleepNow()
         }
         syncAnimalStatus(ownerFarmId)
@@ -1392,6 +1403,7 @@ modelFields.addField(
             sendBackAnimal()
         }
         recallAnimal()
+        if (shouldRunNpcAnimalLogic()) handleNpcAnimalLogic()
         if (shouldHireAnimalNow()) {
             runHireAnimalFeedTaskFlow()
             hireAnimal()
@@ -1408,7 +1420,8 @@ modelFields.addField(
         sendBackAnimal()
     }
 
-    private fun runHireChildTask() {
+    private suspend fun runHireChildTask() {
+        if (shouldRunNpcAnimalLogic()) handleNpcAnimalLogic()
         if (!shouldHireAnimalNow()) return
         runHireAnimalFeedTaskFlow()
         hireAnimal()
@@ -1561,7 +1574,6 @@ modelFields.addField(
                 }
 
                 Log.farm("装扮商城💸[准备兑换 ${item.name} (${item.level}), 价格: ${item.price}]")
-                delay(1000)
 
                 val exchangeJo = runCatching {
                     JSONObject(AntFarmRpcCall.exchangeOrnamentBenefit(item.spuId, item.skuId))
@@ -1569,7 +1581,6 @@ modelFields.addField(
                     Log.printStackTrace(TAG, "exchangeOrnamentBenefit err:", it)
                 }.getOrNull() ?: continue
                 if (isOrnamentRpcSuccess(exchangeJo)) {
-                    delay(2000)
                     val refreshedSnapshot = queryOrnamentMallSnapshot()
                     if (refreshedSnapshot == null) {
                         Log.farm("装扮商城💸[已调用兑换但未回查确认: ${item.name} | ${formatOrnamentRpcResult(exchangeJo)}]")
@@ -2317,7 +2328,7 @@ modelFields.addField(
     /**
      * 自动喂鸡
      */
-    internal suspend fun handleAutoFeedAnimal(isChildTask: Boolean = false) {
+    internal suspend fun handleAutoFeedAnimal(isChildTask: Boolean = false, sleepPreparation: Boolean = false) {
         if (!ownerFarmId.isNullOrBlank()) {
             syncAnimalStatus(ownerFarmId)
         }
@@ -2376,6 +2387,15 @@ modelFields.addField(
             }
         }
 
+        if (sleepPreparation) {
+            val status = checkNotNull(syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL")) {
+                "睡前用卡未取得最新庄园状态"
+            }
+            check(ResChecker.checkRes(TAG, status)) { "睡前用卡状态查询失败" }
+            parseSyncAnimalStatusResponse(status)
+            foodStock = status.getJSONObject("subFarmVO").getInt("foodStock")
+        }
+
         // 3. 使用加饭卡（仅当正在吃饭且开启配置）
         if (useBigEaterTool?.value == true && AnimalFeedStatus.EATING.name == ownerAnimal.animalFeedStatus) {
             // 若服务端已标记今日使用过（或当前有效），本地直接跳过
@@ -2392,6 +2412,8 @@ modelFields.addField(
 
                 if (usedCount >= 2) {
                     Log.farm("今日加饭卡已使用${usedCount}/2，跳过使用")
+                } else if (sleepPreparation && foodStock < 180) {
+                    Log.farm("睡前加饭：当前${foodStock}g，不足额外一份饲料，保留加饭卡")
                 } else {
                     when (useFarmToolDetailed(ownerFarmId, ToolType.BIG_EATER_TOOL)) {
                         FarmToolUseResult.SUCCESS -> {
@@ -2417,7 +2439,7 @@ modelFields.addField(
                         ", " + getAccelerateToolUsageSummary() +
                         ", 今日封顶=" + (detectAccelerateToolLimit(syncFlag = false) != null) + "]"
             )
-            val accelerated = useAccelerateTool()
+            val accelerated = useAccelerateTool(sleepPreparation = sleepPreparation)
             if (accelerated) {
                 Log.farm("使用道具🎭[加速卡]⏩成功")
                 // 刷新状态
@@ -2471,7 +2493,18 @@ modelFields.addField(
             listOrnaments()
         }
     }
-    private fun animalSleepNow() {
+    private fun requiredSleepPreparationFood(hireCount: Int): Long? {
+        val canFeed = feedAnimal?.value == true
+        if (!isOwnerAnimalAtHome() || isOwnerAnimalSleeping() ||
+            (!canFeed && ownerAnimal.animalFeedStatus != AnimalFeedStatus.EATING.name)) return null
+        // 先保障雇佣与基础投喂；用卡在实际消费点检查，不为未必可用的道具冻结饲料。
+        return hireCount.coerceAtLeast(0) * 50L + if (canFeed) 180L else 0L
+    }
+
+    private suspend fun animalSleepNow() {
+        val owner = AccountSessionCoordinator.currentUserId().orEmpty()
+        val epoch = AccountSessionCoordinator.currentSessionEpoch()
+        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
         try {
             var s = AntFarmRpcCall.queryLoveCabin(UserMap.currentUid)
             var jo = JSONObject(s)
@@ -2479,6 +2512,218 @@ modelFields.addField(
                 val sleepNotifyInfo = jo.getJSONObject("sleepNotifyInfo")
                 if (sleepNotifyInfo.optBoolean("canSleep", false)) {
                     val groupId = jo.optString("groupId")
+                    try {
+                        runFarmResourceWork(includeGames = false, feedAfterAwards = false)
+                        currentCoroutineContext().ensureActive()
+                        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                        val status = checkNotNull(syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL")) {
+                            "睡前未取得庄园状态"
+                        }
+                        check(ResChecker.checkRes(TAG, status)) { "睡前庄园状态查询失败" }
+                        parseSyncAnimalStatusResponse(status)
+                        val initialAnimals = status.getJSONObject("subFarmVO").getJSONArray("animals")
+                        // 只预算本次获准轮换的原有雇员，不重复处理新补位的小鸡。
+                        val hireAnimalSet = hireAnimalList?.resolvedIds() ?: emptySet()
+                        val nextWakeAt = farmConfiguredTime(wakeUpTime)?.let {
+                            Calendar.getInstance().apply {
+                                timeInMillis = it
+                                if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+                            }.timeInMillis
+                        }
+                        var workAnimals = if (sendBackAnimal?.value == true && shouldHireAnimalNow()) {
+                            (0 until initialAnimals.length()).map { initialAnimals.getJSONObject(it) }.filter { animal ->
+                                val animalId = animal.optString("animalId")
+                                val masterFarmId = animal.optString("masterFarmId")
+                                if (animal.optString("subAnimalType") != SubAnimalType.WORK.name ||
+                                    animalId.isBlank() || masterFarmId.isBlank() || masterFarmId == ownerFarmId ||
+                                    animal.optString("currentFarmId") != ownerFarmId) return@filter false
+                                val userId = AntFarmRpcCall.farmId2UserId(masterFarmId)
+                                if (userId.isNullOrBlank() || userId == owner ||
+                                    FriendGuard.shouldSkipFriend(userId, TAG, "睡前重雇")) return@filter false
+                                val selectedForSendBack = sendBackAnimalList?.contains(userId) == true
+                                val allowedToSendBack = if (sendBackAnimalType?.value == SendBackAnimalType.BACK) {
+                                    selectedForSendBack
+                                } else !selectedForSendBack
+                                val selectedForHire = hireAnimalSet.contains(userId)
+                                val allowedToHire = if (hireAnimalType?.value == HireAnimalType.DONT_HIRE) {
+                                    !selectedForHire
+                                } else selectedForHire
+                                val hiredUntil = animal.optLong("beHiredEndTime")
+                                allowedToSendBack && allowedToHire && hiredUntil > 0 &&
+                                    (nextWakeAt == null || hiredUntil < nextWakeAt)
+                            }.sortedBy { it.optLong("beHiredEndTime") }
+                        } else emptyList()
+                        currentCoroutineContext().ensureActive()
+                        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                        if (isOwnerAnimalSleeping()) return
+                        if (sendBackAnimal?.value == true) {
+                            sendBackAnimal(sleepPreparation = true)
+                        }
+                        currentCoroutineContext().ensureActive()
+                        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                        var hireBudgetMet = false
+                        if (shouldHireAnimalNow()) {
+                            val hiringStatus = checkNotNull(syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL")) {
+                                "睡前雇佣预算缺少最新庄园状态"
+                            }
+                            check(ResChecker.checkRes(TAG, hiringStatus)) { "睡前雇佣预算状态查询失败" }
+                            parseSyncAnimalStatusResponse(hiringStatus)
+                            // 预算不接受库存字段缺失时沿用旧值。
+                            foodStock = hiringStatus.getJSONObject("subFarmVO").getInt("foodStock")
+                            val hiringAnimals = hiringStatus.getJSONObject("subFarmVO").getJSONArray("animals")
+                            val currentAnimals = (0 until hiringAnimals.length()).map { hiringAnimals.getJSONObject(it) }
+                            val reserveNpcSlot = selectedNpcConfig() != NpcConfig.NONE &&
+                                currentAnimals.none { it.optString("subAnimalType") == "NPC" }
+                            val animalLimit = 3 - if (reserveNpcSlot) 1 else 0
+                            val vacancyCount = (animalLimit - currentAnimals.size).coerceAtLeast(0)
+                            val baseFood = requiredSleepPreparationFood(vacancyCount)
+                            val affordableRotations = if (baseFood != null && foodStock >= baseFood &&
+                                currentAnimals.size <= animalLimit) {
+                                ((foodStock - baseFood) / 50L).coerceAtMost(workAnimals.size.toLong()).toInt()
+                            } else 0
+                            // 预算不足以全换时，仍可闭环处理最早到期且负担得起的部分。
+                            workAnimals = workAnimals.filter { planned ->
+                                currentAnimals.any {
+                                    it.optString("animalId") == planned.optString("animalId") &&
+                                        it.optString("subAnimalType") == SubAnimalType.WORK.name &&
+                                        it.optLong("beHiredEndTime") > 0 &&
+                                        (nextWakeAt == null || it.optLong("beHiredEndTime") < nextWakeAt)
+                                }
+                            }.take(affordableRotations)
+                            val hireCount = vacancyCount + workAnimals.size
+                            val requiredFood = requiredSleepPreparationFood(hireCount)
+                            hireBudgetMet = requiredFood != null && foodStock >= requiredFood
+                            if (hireBudgetMet) {
+                                runHireAnimalFeedTaskFlow()
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                hireAnimal()
+                            } else {
+                                Log.farm("睡前雇佣：${hireCount}只雇佣及基础喂食需${requiredFood?.let { "${it}g" } ?: "未确认"}，当前${foodStock}g，跳过雇佣和打工鸡遣返")
+                            }
+                        }
+                        if (hireBudgetMet && sendBackAnimal?.value == true && shouldHireAnimalNow()) {
+                            for ((index, animal) in workAnimals.withIndex()) {
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                val animalId = animal.optString("animalId")
+                                val masterFarmId = animal.optString("masterFarmId")
+                                if (animalId.isBlank() || masterFarmId.isBlank() || masterFarmId == ownerFarmId ||
+                                    animal.optString("currentFarmId") != ownerFarmId) continue
+                                val userId = AntFarmRpcCall.farmId2UserId(masterFarmId)
+                                if (userId.isNullOrBlank() || userId == owner ||
+                                    FriendGuard.shouldSkipFriend(userId, TAG, "睡前重雇")) continue
+                                var excludedFromSendBack = sendBackAnimalList?.contains(userId) == true
+                                if (sendBackAnimalType?.value == SendBackAnimalType.BACK) {
+                                    excludedFromSendBack = !excludedFromSendBack
+                                }
+                                var allowedToHire = hireAnimalSet.contains(userId)
+                                if (hireAnimalType?.value == HireAnimalType.DONT_HIRE) {
+                                    allowedToHire = !allowedToHire
+                                }
+                                if (excludedFromSendBack || !allowedToHire) continue
+
+                                val before = syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL") ?: break
+                                if (!ResChecker.checkRes(TAG, before)) break
+                                parseSyncAnimalStatusResponse(before)
+                                foodStock = before.getJSONObject("subFarmVO").getInt("foodStock")
+                                val beforeAnimals = before.getJSONObject("subFarmVO").getJSONArray("animals")
+                                val currentAnimals = (0 until beforeAnimals.length()).map { beforeAnimals.getJSONObject(it) }
+                                val currentAnimal = currentAnimals.firstOrNull {
+                                    it.optString("animalId") == animalId &&
+                                        it.optString("subAnimalType") == SubAnimalType.WORK.name &&
+                                        it.optString("masterFarmId") == masterFarmId &&
+                                        it.optString("currentFarmId") == ownerFarmId
+                                } ?: continue
+                                val hiredUntil = currentAnimal.optLong("beHiredEndTime")
+                                if (hiredUntil <= 0 || (nextWakeAt != null && hiredUntil >= nextWakeAt)) continue
+                                if (sendBackAnimal?.value != true || !shouldHireAnimalNow()) break
+                                val reserveNpcSlot = selectedNpcConfig() != NpcConfig.NONE &&
+                                    currentAnimals.none { it.optString("subAnimalType") == "NPC" }
+                                val animalLimit = 3 - if (reserveNpcSlot) 1 else 0
+                                if (currentAnimals.size > animalLimit) {
+                                    Log.farm("睡前重雇：当前鸡群占用了 NPC 预留位置，遣返后无法补位，保留现有打工鸡")
+                                    break
+                                }
+                                val remainingWorkCount = workAnimals.drop(index).count { planned ->
+                                    currentAnimals.any { it.optString("animalId") == planned.optString("animalId") &&
+                                        it.optString("subAnimalType") == SubAnimalType.WORK.name }
+                                }
+                                val remainingHireCount = (animalLimit - currentAnimals.size).coerceAtLeast(0) + remainingWorkCount
+                                val requiredFood = requiredSleepPreparationFood(remainingHireCount)
+                                if (requiredFood == null || foodStock < requiredFood) {
+                                    Log.farm("睡前重雇：剩余${remainingHireCount}只雇佣及基础喂食需${requiredFood?.let { "${it}g" } ?: "未确认"}，当前${foodStock}g，保留剩余打工鸡")
+                                    break
+                                }
+                                val workCountBefore = currentAnimals.count { it.optString("subAnimalType") == SubAnimalType.WORK.name }
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                val sent = JSONObject(AntFarmRpcCall.sendBackAnimal("NORMAL", animalId, ownerFarmId, masterFarmId))
+                                if (!ResChecker.checkRes(TAG, sent)) {
+                                    Log.farm("睡前重雇：遣返打工鸡失败，停止后续遣返[$sent]")
+                                    break
+                                }
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                val after = syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL") ?: break
+                                if (!ResChecker.checkRes(TAG, after)) break
+                                parseSyncAnimalStatusResponse(after)
+                                val remainingAnimals = after.getJSONObject("subFarmVO").getJSONArray("animals")
+                                if ((0 until remainingAnimals.length()).any { remainingAnimals.getJSONObject(it).optString("animalId") == animalId }) {
+                                    Log.farm("睡前重雇：打工鸡尚未确认离场，停止后续遣返")
+                                    break
+                                }
+                                val childId = "HIRE|$animalId"
+                                // 父类按同 ID 替换取消旧内存等待；空任务不触发雇佣。
+                                addChildTask(ModelTask.ChildModelTask(
+                                    id = childId, group = "HIRE", suspendRunnable = {}, execTime = System.currentTimeMillis(),
+                                ))
+                                cancelPersistentChildTask(childId)
+                                Log.farm("睡前重雇：已遣返[${UserMap.getMaskName(userId) ?: userId}]，开始补位")
+                                runHireAnimalFeedTaskFlow()
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                hireAnimal()
+                                currentCoroutineContext().ensureActive()
+                                if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                                val refreshed = syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL") ?: break
+                                if (!ResChecker.checkRes(TAG, refreshed)) break
+                                parseSyncAnimalStatusResponse(refreshed)
+                                val hiredAnimals = refreshed.getJSONObject("subFarmVO").getJSONArray("animals")
+                                registerHiredWorkAnimals(hiredAnimals)
+                                val workCountAfter = (0 until hiredAnimals.length()).count {
+                                    hiredAnimals.getJSONObject(it).optString("subAnimalType") == SubAnimalType.WORK.name
+                                }
+                                if (workCountAfter < workCountBefore) {
+                                    Log.farm("睡前重雇：未补齐打工鸡，停止后续遣返")
+                                    break
+                                }
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        Log.printStackTrace(TAG, "睡前鸡群准备失败，继续喂食并尝试睡觉:", t)
+                    }
+                    try {
+                        currentCoroutineContext().ensureActive()
+                        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                        // 即使未执行重雇，也保留原喂食中的领奖、按配置补兑与换装链路。
+                        handleAutoFeedAnimal(sleepPreparation = true)
+                        currentCoroutineContext().ensureActive()
+                        if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
+                        syncAnimalStatus(ownerFarmId)
+                        if (feedAnimal?.value == true && AnimalFeedStatus.HUNGRY.name == ownerAnimal.animalFeedStatus &&
+                            foodStock >= 180 && feedAnimal(ownerFarmId)) {
+                            syncAnimalStatus(ownerFarmId)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        Log.printStackTrace(TAG, "睡前喂食失败，继续尝试睡觉:", t)
+                    }
+                    currentCoroutineContext().ensureActive()
+                    if (ApplicationHookConstants.isOffline() || !AccountSessionCoordinator.isCurrentSession(owner, epoch)) return
                     s = if (groupId.isNotEmpty()) {
                         AntFarmRpcCall.sleep(groupId)
                     } else {
@@ -2503,6 +2748,8 @@ modelFields.addField(
                     Log.farm("小鸡无需睡觉🛌")
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "animalSleepNow err:",t)
         }
@@ -2676,12 +2923,15 @@ modelFields.addField(
         }
     }
 
-    internal fun sendBackAnimal() {
+    internal fun sendBackAnimal(sleepPreparation: Boolean = false) {
         if (animals == null) {
             return
         }
         try {
             for (animal in animals?.toList().orEmpty().shuffled()) {
+                if (sleepPreparation && (animal.masterFarmId == ownerFarmId || animal.subAnimalType == "NPC")) {
+                    continue
+                }
                 if (AnimalInteractStatus.STEALING.name == animal.animalInteractStatus && (SubAnimalType.GUEST.name != animal.subAnimalType) && (SubAnimalType.WORK.name != animal.subAnimalType)) {
                     // 赶鸡
                     val userId = AntFarmRpcCall.farmId2UserId(animal.masterFarmId)
@@ -3462,7 +3712,7 @@ modelFields.addField(
     private fun doFarmTasks(): TaskFlowRunResult {
         return try {
             val result = TaskFlowEngine(
-                FarmDailyTaskFlowAdapter(), roundSleepMs = 800L, executionState = farmTaskExecutionState,
+                FarmDailyTaskFlowAdapter(), roundSleepMs = 680L, executionState = farmTaskExecutionState,
             ).run()
             syncAnimalStatus(ownerFarmId)
             Status.setFlagToday(StatusFlags.FLAG_FARM_TASK_FINISHED, resolveFarmTaskFlagState())
@@ -3481,7 +3731,7 @@ modelFields.addField(
      */
     internal fun runHireAnimalFeedTaskFlow() {
         try {
-            TaskFlowEngine(FarmHireTaskFlowAdapter(), roundSleepMs = 300L).run()
+            TaskFlowEngine(FarmHireTaskFlowAdapter(), roundSleepMs = 255L).run()
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "runHireAnimalFeedTaskFlow 错误:", t)
         }
@@ -3544,6 +3794,21 @@ modelFields.addField(
         }
 
         override fun complete(item: TaskFlowItem): TaskFlowActionResult {
+            val farm = enterFarm() ?: return TaskFlowActionResult.failure(
+                TaskRpcFailureType.RETRYABLE_RPC, message = "雇佣前未取得本庄园状态", rpc = "AntFarm.enterFarm",
+            )
+            val farmAnimals = farm.optJSONObject("farmVO")?.optJSONObject("subFarmVO")?.optJSONArray("animals")
+                ?: return TaskFlowActionResult.failure(
+                    TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW, message = "雇佣前缺少本庄园动物列表",
+                    rpc = "AntFarm.enterFarm", raw = farm.toString(),
+                )
+            val reserveNpcSlot = selectedNpcConfig() != NpcConfig.NONE &&
+                (0 until farmAnimals.length()).none { farmAnimals.getJSONObject(it).optString("subAnimalType") == "NPC" }
+            val animalLimit = 3 - if (reserveNpcSlot) 1 else 0
+            if (farmAnimals.length() >= animalLimit) return TaskFlowActionResult.defer(
+                DeferredReason.CAPACITY_LIMIT, message = "当前没有可供任务雇佣的位置",
+                detail = "animals=${farmAnimals.length()} limit=$animalLimit reserveNpcSlot=$reserveNpcSlot",
+            )
             val candidateListResponse = AntFarmRpcCall.hireAnimalTaskList()
             if (candidateListResponse.isEmpty()) {
                 return TaskFlowActionResult.failure(
@@ -3619,7 +3884,7 @@ modelFields.addField(
             syncHireAnimalFoodStock(hireJo)
             hireJo.optJSONArray("animals")?.let(::registerHiredWorkAnimals)
             Log.farm("雇佣小鸡饲料任务🧾[已雇佣${candidate.rewardFoodNum}g候选，等待任务状态刷新]")
-            return TaskFlowActionResult.success(refreshAfterAction = true)
+            return TaskFlowActionResult.success(refreshAfterAction = true, progressChanged = false)
         }
 
         override fun receive(item: TaskFlowItem): TaskFlowActionResult {
@@ -3669,7 +3934,7 @@ modelFields.addField(
             val classification = classifyFarmRpcFailure(response)
             Log.error(
                 TAG,
-                "雇佣小鸡饲料任务查询失败: ${formatFarmHighRiskFailure("listFarmTask", response, classification)}",
+                "$flowName[任务查询失败] ${formatFarmHighRiskFailure("listFarmTask", response, classification)}",
             )
         }
 
@@ -3991,10 +4256,6 @@ modelFields.addField(
             return "${action.logName}:${item.type.ifBlank { item.id }}:${item.progress.ifBlank { "NO_PROGRESS" }}"
         }
 
-        override fun onQueryFailed(response: JSONObject) {
-            Log.error(TAG, "庄园饲料任务查询失败 raw=$response")
-        }
-
         override fun logInfo(message: String) {
             Log.farm(message)
         }
@@ -4045,7 +4306,7 @@ modelFields.addField(
             }
             Log.record(TAG, "${if (isManual) "手动" else "自动"}多阶段任务补全循环开始...")
             TaskFlowEngine(
-                FarmMultiStageTaskFlowAdapter(isManual), roundSleepMs = 800L, executionState = farmTaskExecutionState,
+                FarmMultiStageTaskFlowAdapter(isManual), roundSleepMs = 680L, executionState = farmTaskExecutionState,
             ).run()
         } catch (e: CancellationException) {
             throw e
@@ -4652,7 +4913,6 @@ modelFields.addField(
                 noProgressTaskIds.add(taskId)
                 continue
             }
-            GlobalThreadPools.sleepCompat(300L)
             if (confirmFarmTaskAwardProgress(task, taskId)) {
                 Log.farm("收取庄园美食奖励[$taskTitle]已确认")
                 progressed = true
@@ -4782,17 +5042,18 @@ modelFields.addField(
                         }
 
 
+                        val beforeFoodStock = foodStock
                         val receiveTaskAwardjo = JSONObject(AntFarmRpcCall.receiveFarmTaskAward(taskId, awardType))
                         if (ResChecker.checkRes(TAG, "领取庄园任务奖励失败:", receiveTaskAwardjo)) {
-                            GlobalThreadPools.sleepCompat(300L)
-                            if (!confirmFarmTaskAwardProgress(task, taskId)) {
+                            syncAnimalStatus(ownerFarmId)
+                            val receivedFood = (foodStock - beforeFoodStock).coerceAtLeast(0)
+                            if (receivedFood == 0 && !confirmFarmTaskAwardProgress(task, taskId)) {
                                 Log.error(TAG, "庄园饲料奖励[$taskTitle] ACK 后状态未确认，当前轮不再重复领取")
                                 noProgressFoodAwardTaskIds.add(taskId)
                                 unreceiveTaskAward++
                                 continue
                             }
-                            syncAnimalStatus(ownerFarmId)
-                            Log.farm("收取庄园任务奖励[$taskTitle]🍪${awardCount}g (剩余容量: ${foodStockLimit - foodStock}g)")
+                            Log.farm("庄园任务奖励[$taskTitle]领取已确认，饲料增加${receivedFood}g (剩余容量: ${foodStockLimit - foodStock}g)")
                             val nextFoodStockLeft = foodStockLimit - foodStock
                             if (nextFoodStockLeft <= 0) {
                                 Log.farm("领取饲料后饲料[已满]$foodStock g，停止后续领取")
@@ -5267,7 +5528,10 @@ modelFields.addField(
      *
      * @return true: 使用成功，false: 使用失败
      */
-    private suspend fun useAccelerateTool(releaseRewardSlot: Boolean = false): Boolean {
+    private suspend fun useAccelerateTool(
+        releaseRewardSlot: Boolean = false,
+        sleepPreparation: Boolean = false,
+    ): Boolean {
         if ((useAccelerateTool?.value != true && !releaseRewardSlot) || !isOwnerAnimalAtHome() ||
             ownerAnimal.animalFeedStatus != AnimalFeedStatus.EATING.name || ApplicationHookConstants.isOffline()
         ) return false
@@ -5358,6 +5622,19 @@ modelFields.addField(
 
                 null -> Unit
             }
+            if (sleepPreparation) {
+                currentCoroutineContext().ensureActive()
+                val status = syncAnimalStatus(ownerFarmId, "SYNC_RESUME", "QUERY_ALL") ?: break
+                if (!ResChecker.checkRes(TAG, status)) break
+                parseSyncAnimalStatusResponse(status)
+                foodStock = status.getJSONObject("subFarmVO").getInt("foodStock")
+                if (!isOwnerAnimalAtHome() || ownerAnimal.animalFeedStatus != AnimalFeedStatus.EATING.name ||
+                    feedAnimal?.value != true || foodStock < 180) {
+                    Log.farm("睡前加速：无法保证吃空后的补喂，保留剩余加速卡")
+                    exitReason = "SLEEP_FEED_REQUIRED"
+                    break
+                }
+            }
             if (accelerateToolCount <= 0) {
                 val replenishedTool = replenishFarmToolIfMissing(
                     ownerFarmId,
@@ -5394,10 +5671,8 @@ modelFields.addField(
                     syncAnimalStatus(ownerFarmId)
                     if (AnimalFeedStatus.HUNGRY.name == ownerAnimal.animalFeedStatus) {
                         if (feedAnimal?.value == true && feedAnimal(ownerFarmId)) {
-                            // 这里似乎不用在刷新了
                             syncAnimalStatus(ownerFarmId)
-                            // 投喂成功后剩余食物变成了180g
-                            remainingFood = 180.0
+                            remainingFood = (countdown?.toDouble() ?: 0.0) * totalConsumeSpeed
                             Log.farm("加速卡后投喂小鸡成功！")
                             receiveFarmAwards()
                         } else {
@@ -6409,7 +6684,6 @@ modelFields.addField(
                         break
                     }
                 }
-                CoroutineUtils.sleepCompat(RandomUtil.nextInt(1000, 2000).toLong())
             }
         } catch (e: CancellationException) {
             throw e
@@ -7317,10 +7591,13 @@ modelFields.addField(
                 i++
             }
             var animalCount = animals.length()
-            if (animalCount >= 3) {
+            val reserveNpcSlot = selectedNpcConfig() != NpcConfig.NONE &&
+                (0 until animals.length()).none { animals.getJSONObject(it).optString("subAnimalType") == "NPC" }
+            val animalLimit = 3 - if (reserveNpcSlot) 1 else 0
+            if (animalCount >= animalLimit) {
                 return
             }
-            val needHireCount = 3 - animalCount
+            val needHireCount = animalLimit - animalCount
             Log.farm("雇佣小鸡👷[当前可雇佣小鸡数量:${needHireCount}只]")
 
             // 前置检查：饲料是否足够
@@ -7374,10 +7651,10 @@ modelFields.addField(
                     Log.farm(s)
                     break
                 }
-            } while (hasNext && animalCount < 3 && !hireAnimalFoodInsufficient && foodStock >= 50)
+            } while (hasNext && animalCount < animalLimit && !hireAnimalFoodInsufficient && foodStock >= 50)
 
             for (joo in friendRankings.shuffled()) {
-                if (animalCount >= 3 || hireAnimalFoodInsufficient || foodStock < 50) break
+                if (animalCount >= animalLimit || hireAnimalFoodInsufficient || foodStock < 50) break
                 val userId = joo.getString("userId")
                 if (FriendGuard.shouldSkipFriend(userId, TAG, "雇佣小鸡")) {
                     continue
@@ -7403,7 +7680,7 @@ modelFields.addField(
                             Log.farm("雇佣小鸡👷[饲料不足，停止本轮雇佣] 当前${foodStock}g，至少需要50g")
                             break
                         }
-                        if (animalCount >= 3) {
+                        if (animalCount >= animalLimit) {
                             break
                         }
                         continue
@@ -7593,25 +7870,25 @@ modelFields.addField(
     /**
      * 芝麻炼金已确认领取并反馈雇佣任务后，才允许庄园侧雇佣或切换到大表鸽。
      */
-    internal suspend fun activateZhimaPigeonFromAlchemyTask(): TaskFlowActionResult = farmWorkflowMutex.withLock {
+    internal suspend fun activateZhimaPigeonFromAlchemyTask(): TaskFlowActionResult = farmWorkflowQueue.submit {
         if (!isZhimaPigeonConfigured()) {
-            return@withLock TaskFlowActionResult.defer(DeferredReason.PREREQUISITE_PENDING, message = "未配置芝麻大表鸽")
+            return@submit TaskFlowActionResult.defer(DeferredReason.PREREQUISITE_PENDING, message = "未配置芝麻大表鸽")
         }
         if (hasPendingZhimaPigeonRewardReceipt()) {
-            return@withLock TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "满产奖励仍待收取确认，暂缓新雇佣")
+            return@submit TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "满产奖励仍待收取确认，暂缓新雇佣")
         }
         if (ownerFarmId.isNullOrBlank() && enterFarm() == null) {
-            return@withLock TaskFlowActionResult.failure(
+            return@submit TaskFlowActionResult.failure(
                 TaskRpcFailureType.RETRYABLE_RPC,
                 message = "庄园状态未就绪，保留后续重试",
                 rpc = "AntFarm.enterFarm",
             )
         }
-        val result = handleNpcAnimalLogic(allowZhimaPigeonHire = true)
-        if (!result.success) return@withLock result
-        runZhimaPigeonTaskFlow()
+        val result = handleNpcAnimalLogic()
+        if (!result.success) return@submit result
+        runNpcTaskFlow()
         if (hasPendingZhimaPigeonRewardReceipt()) {
-            return@withLock TaskFlowActionResult.defer(
+            return@submit TaskFlowActionResult.defer(
                 DeferredReason.STATE_CONFIRMATION,
                 message = "满产遣返已发起，等待奖励确认",
                 refreshAfterAction = true,
@@ -7620,10 +7897,8 @@ modelFields.addField(
         result
     }
 
-    /**
-     * 常规庄园流程只维护已经存在的大表鸽；首次雇佣必须由炼金任务的成功闭环触发。
-     */
-    internal suspend fun handleNpcAnimalLogic(allowZhimaPigeonHire: Boolean = false): TaskFlowActionResult {
+    /** 按用户选择维护单个NPC席位，待收奖励确认后才进入下一次雇佣。 */
+    internal suspend fun handleNpcAnimalLogic(): TaskFlowActionResult {
         try {
             val targetConfig = selectedNpcConfig()
             if (targetConfig == NpcConfig.NONE) {
@@ -7646,34 +7921,26 @@ modelFields.addField(
                     TaskFlowActionResult.success(progressChanged = false)
                 }
             }
+            if (hasPendingZhimaPigeonRewardReceipt()) {
+                return TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "大表鸽奖励待收取确认")
+            }
             val hiredWorkers = syncResult.animals.filter { it.raw.optString("subAnimalType") == "WORK" }
-            val occupiedSlots = hiredWorkers.size + syncResult.npcs.size
-            val currentNpc = if (targetConfig == NpcConfig.ZHIMA_PIGEON && occupiedSlots >= 2 && hiredWorkers.isNotEmpty()) {
-                hiredWorkers.minWithOrNull(compareBy<NpcAnimalSnapshot> {
-                    it.raw.optLong("beHiredEndTime", Long.MAX_VALUE)
-                }.thenBy { it.animal.animalId })
-            } else selectReplaceableNpc(syncResult.npcs)
+            val currentNpc = selectReplaceableNpc(syncResult.npcs)
+            if (currentNpc == null && syncResult.npcs.isEmpty() && hiredWorkers.size >= 2) {
+                return TaskFlowActionResult.defer(
+                    DeferredReason.CHILD_TASK_PENDING, message = "工鸡席位已满，等待到期后雇佣NPC",
+                    deferredUntil = hiredWorkers.map { it.raw.optLong("beHiredEndTime") }
+                        .filter { it > System.currentTimeMillis() }.minOrNull(),
+                )
+            }
 
             if (currentNpc == null) {
                 if (syncResult.npcs.isNotEmpty()) {
                     Log.farm("NPC小鸡🤖[现有NPC均有待领奖励，不遣返，等待后续回查]")
                     return TaskFlowActionResult.defer(DeferredReason.CHILD_TASK_PENDING, message = "现有NPC奖励待处理")
                 }
-                if (targetConfig == NpcConfig.ZHIMA_PIGEON && hasPendingZhimaPigeonRewardReceipt()) {
-                    Log.farm("芝麻大表鸽🤖[满产奖励待芝麻信用收取确认，暂缓新雇佣]")
-                    return TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "满产奖励待收取")
-                }
-                if (targetConfig == NpcConfig.ZHIMA_PIGEON && !allowZhimaPigeonHire) {
-                    Log.farm("芝麻大表鸽🤖[等待芝麻炼金任务触发雇佣]")
-                    return TaskFlowActionResult.defer(DeferredReason.PREREQUISITE_PENDING, message = "等待炼金任务授权")
-                }
                 Log.farm("NPC小鸡🤖[当前未雇佣，准备雇佣${targetConfig.nickName}]")
                 return hireNpc(targetConfig)
-            }
-
-            if (targetConfig == NpcConfig.ZHIMA_PIGEON && !allowZhimaPigeonHire) {
-                Log.farm("芝麻大表鸽🤖[当前已有其他NPC，等待芝麻炼金任务触发切换]")
-                return TaskFlowActionResult.defer(DeferredReason.PREREQUISITE_PENDING, message = "等待炼金任务授权切换")
             }
 
             val currentName = currentNpc.animal.masterUserInfoVO?.get("nickName") as? String ?: "未知NPC"
@@ -7699,8 +7966,8 @@ modelFields.addField(
                 val latest = syncNpcAnimalStatus(source, "SYNC_NPC_REPLACE") ?: return TaskFlowActionResult.failure(
                     TaskRpcFailureType.RETRYABLE_RPC, message = "遣返后NPC状态同步失败", rpc = "AntFarmRpcCall.syncAnimalStatus",
                 )
-                if (latest.animals.any { it.animal.animalId == currentNpc.animal.animalId }) {
-                    Log.error(TAG, "NPC小鸡遣返ACK后仍在场，等待离场确认 animalId=${currentNpc.animal.animalId}")
+                if (latest.animals.any { it.animal.animalId == currentNpc.animal.animalId } || latest.npcs.isNotEmpty()) {
+                    Log.error(TAG, "NPC小鸡遣返ACK后席位仍占用，等待离场确认 animalId=${currentNpc.animal.animalId}")
                     return TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "遣返后仍在场，等待确认")
                 }
                 Log.farm("NPC小鸡🤖[已确认遣返${currentName}]")
@@ -7714,6 +7981,7 @@ modelFields.addField(
                 return buildFarmTaskFailureResult(sendBackJo, currentNpc.animal.animalId.orEmpty(), currentName, "sendBackNpc", "AntFarmRpcCall.sendBackNpcAnimal")
             }
         } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException || t is InterruptedException) throw t
             Log.printStackTrace(TAG, "handleNpcAnimalLogic err:", t)
             return TaskFlowActionResult.failure(
                 TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW, message = t.message.orEmpty(), rpc = "AntFarm.handleNpcAnimalLogic",
@@ -7721,23 +7989,29 @@ modelFields.addField(
         }
     }
 
-    /**
-     * 厨房和乐园动作完成后，统一补收大表鸽已完成任务并回查产出是否达到 88 粒。
-     */
-    internal fun runZhimaPigeonTaskFlow() {
-        if (!isZhimaPigeonConfigured()) {
-            return
-        }
-
-        val config = NpcConfig.ZHIMA_PIGEON
-        val initialSync = syncNpcAnimalStatus(config.source, "SYNC__NPC_TASKLIST_INIT") ?: return
-        if (initialSync.find(config.animalId) == null) return
-
-        TaskFlowEngine(ZhimaPigeonTaskFlowAdapter(), roundSleepMs = 300L).run()
-
-        val latestSync = syncNpcAnimalStatus(config.source, "SYNC__NPC_TASKLIST") ?: return
-        latestSync.find(config.animalId)?.let {
-            checkNpcReward(it, config)
+    /** 厨房和乐园动作完成后，按实际在场的NPC补收任务奖励并回查产出。 */
+    internal fun runNpcTaskFlow() {
+        if (ApplicationHookConstants.isOffline()) return
+        // 已有庄园状态明确没有NPC时直接退出；尚未取得状态时仍需同步确认。
+        if (animals?.none { it.subAnimalType == "NPC" } == true) return
+        val initialSync = syncNpcAnimalStatus("H5", "SYNC__NPC_TASKLIST_INIT") ?: return
+        for (snapshot in initialSync.npcs.distinctBy { it.animal.animalId }) {
+            if (ApplicationHookConstants.isOffline()) return
+            val config = NpcConfig.entries.firstOrNull {
+                it != NpcConfig.NONE && it.animalId == snapshot.animal.animalId
+            }
+            if (config == null) {
+                Log.error(TAG, "NPC小鸡未识别在场类型，保留现状 animalId=${snapshot.animal.animalId}")
+                continue
+            }
+            if (config.taskSceneCode.isNotBlank()) {
+                val result = TaskFlowEngine(NpcTaskFlowAdapter(config), roundSleepMs = 255L).run()
+                if (result.interrupted || ApplicationHookConstants.isOffline()) return
+            }
+            val latestSync = syncNpcAnimalStatus(config.source, "SYNC__NPC_TASKLIST") ?: return
+            latestSync.find(config.animalId)?.let {
+                checkNpcReward(it, config)
+            }
         }
     }
 
@@ -7775,6 +8049,7 @@ modelFields.addField(
                 val raw = animalsArray.getJSONObject(index)
                 NpcAnimalSnapshot(objectMapper.readValue(raw.toString(), Animal::class.java), raw)
             }
+            animals = npcs.map { it.animal }.toTypedArray()
             NpcAnimalSyncResult(npcs)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "syncNpcAnimalStatus err", t)
@@ -7794,19 +8069,33 @@ modelFields.addField(
 
     private fun hireNpc(config: NpcConfig): TaskFlowActionResult {
         try {
+            if (config == NpcConfig.TAOJINBI_CHICKEN) {
+                val visit = JSONObject(AntFarmRpcCall.npcVisitAnimal())
+                if (!ResChecker.checkRes(TAG, visit)) {
+                    return buildFarmTaskFailureResult(visit, config.animalId, config.nickName, "npcVisitAnimal", "AntFarmRpcCall.npcVisitAnimal")
+                }
+                if (visit.optJSONObject("npcVisitAnimal")?.optString("animalId") == config.animalId) {
+                    val report = JSONObject(AntFarmRpcCall.npcVisitAnimalReport(config.animalId, "IMPRESSION"))
+                    if (!ResChecker.checkRes(TAG, report)) {
+                        return buildFarmTaskFailureResult(report, config.animalId, config.nickName, "IMPRESSION", "AntFarmRpcCall.npcVisitAnimalReport")
+                    }
+                }
+            }
             val response = AntFarmRpcCall.hireNpcAnimal(config.animalId, config.source)
             val responseJo = JSONObject(response)
             if (ResChecker.checkRes(TAG, responseJo)) {
-                if (config == NpcConfig.ZHIMA_PIGEON) {
-                    val current = syncNpcAnimalStatus(config.source, "SYNC__NPC_TASKLIST_INIT")
-                        ?: return TaskFlowActionResult.failure(
-                            TaskRpcFailureType.RETRYABLE_RPC, message = "雇佣后状态查询失败", rpc = "AntFarmRpcCall.syncAnimalStatus",
-                        )
-                    if (current.find(config.animalId) == null) {
-                        return TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "雇佣请求已接受，等待到场确认")
+                val current = syncNpcAnimalStatus(config.source, "SYNC__NPC_TASKLIST_INIT")
+                    ?: return TaskFlowActionResult.failure(
+                        TaskRpcFailureType.RETRYABLE_RPC, message = "雇佣后状态查询失败", rpc = "AntFarmRpcCall.syncAnimalStatus",
+                    )
+                if (current.find(config.animalId) == null) {
+                    return TaskFlowActionResult.defer(DeferredReason.STATE_CONFIRMATION, message = "雇佣请求已接受，等待到场确认")
+                }
+                if (config == NpcConfig.TAOJINBI_CHICKEN) {
+                    val report = JSONObject(AntFarmRpcCall.npcVisitAnimalReport(config.animalId, "HIRE"))
+                    if (!ResChecker.checkRes(TAG, report)) {
+                        return buildFarmTaskFailureResult(report, config.animalId, config.nickName, "HIRE", "AntFarmRpcCall.npcVisitAnimalReport")
                     }
-                } else {
-                    syncAnimalStatus(ownerFarmId)
                 }
                 Log.farm("NPC小鸡🤖[成功雇佣${config.nickName}]")
                 return TaskFlowActionResult.success(refreshAfterAction = true)
@@ -7818,6 +8107,7 @@ modelFields.addField(
             )
             return buildFarmTaskFailureResult(responseJo, config.animalId, config.nickName, "hireNpc", "AntFarmRpcCall.hireNpcAnimal")
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException || e is InterruptedException) throw e
             Log.printStackTrace(TAG, "hireNpc err", e)
             return TaskFlowActionResult.failure(
                 TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW, message = e.message.orEmpty(), rpc = "AntFarmRpcCall.hireNpcAnimal",
@@ -7847,8 +8137,10 @@ modelFields.addField(
 
         val fullRewardMessage = if (config == NpcConfig.ZHIMA_PIGEON) {
             "遣返并等待88芝麻粒收取确认"
+        } else if (selectedNpcConfig() == config) {
+            "收取并离场，确认席位空闲后重雇"
         } else {
-            "领取并重雇"
+            "收取并离场"
         }
         Log.farm("NPC小鸡🤖[${config.nickName}产出已满($currentReward)，$fullRewardMessage]")
         if (config == NpcConfig.ZHIMA_PIGEON) {
@@ -7871,37 +8163,33 @@ modelFields.addField(
             return
         }
 
-        if (config != NpcConfig.ZHIMA_PIGEON) {
-            Log.farm("NPC小鸡🤖[奖励领取成功]")
-            hireNpc(config)
+        val afterSendBack = syncNpcAnimalStatus(config.source, "SYNC_AFTER_SEND_BACK_NPC") ?: return
+        if (afterSendBack.find(config.animalId) != null) {
+            Log.error(TAG, "NPC小鸡🤖[遣返请求已受理但未确认离场:${config.nickName}]")
             return
         }
-
-        val afterSendBack = syncNpcAnimalStatus("H5", "SYNC_AFTER_SEND_BACK_NPC")
-        if (afterSendBack != null && afterSendBack.find(config.animalId) == null) {
-            if (markZhimaPigeonRewardReceiptPending()) {
-                Log.farm("芝麻大表鸽🤖[已遣返，等待芝麻信用收取88芝麻粒并回查确认]")
-            } else {
-                Log.error(TAG, "芝麻大表鸽🤖[遣返已确认但待收状态未持久化，保留后续人工复核]")
-            }
+        if (config == NpcConfig.ZHIMA_PIGEON) {
+            Log.farm("芝麻大表鸽🤖[已遣返，等待芝麻信用收取88芝麻粒并回查确认]")
         } else {
-            Log.error(TAG, "芝麻大表鸽🤖[遣返成功但回查未确认离场，保留后续复核]")
+            Log.farm("NPC小鸡🤖[${config.nickName}奖励领取并离场已确认]")
+            if (selectedNpcConfig() == config && afterSendBack.npcs.isEmpty()) hireNpc(config)
         }
     }
 
-    private inner class ZhimaPigeonTaskFlowAdapter : TaskFlowAdapter {
+    private inner class NpcTaskFlowAdapter(private val config: NpcConfig) : TaskFlowAdapter {
         override val moduleName: String = farmTaskBlacklistModule
-        override val flowName: String = "芝麻大表鸽任务"
+        override val flowName: String = "${config.nickName}任务"
 
-        override fun query(): JSONObject = JSONObject(AntFarmRpcCall.listZhimaNpcFarmTask())
+        override fun query(): JSONObject = JSONObject(AntFarmRpcCall.listNpcFarmTask(config.source, config.taskSceneCode))
 
-        override fun isQuerySuccess(response: JSONObject): Boolean = ResChecker.checkRes(TAG, response)
+        override fun isQuerySuccess(response: JSONObject): Boolean =
+            ResChecker.checkRes(TAG, response) && response.optJSONArray("farmTaskList") != null
 
         override fun onQueryFailed(response: JSONObject) {
             val classification = classifyFarmRpcFailure(response)
             Log.error(
                 TAG,
-                "芝麻大表鸽任务查询失败: ${formatFarmHighRiskFailure("listZhimaNpcFarmTask", response, classification)}",
+                "$flowName[任务查询失败] ${formatFarmHighRiskFailure("listNpcFarmTask", response, classification)}",
             )
         }
 
@@ -7916,7 +8204,7 @@ modelFields.addField(
                             title = task.optString("title"),
                             status = task.optString("taskStatus"),
                             type = task.optString("awardType"),
-                            sceneCode = "ANTFARM_ZHIMA_NPC_TASK",
+                            sceneCode = config.taskSceneCode,
                             raw = task,
                         ),
                     )
@@ -7927,16 +8215,17 @@ modelFields.addField(
         override fun mapPhase(item: TaskFlowItem): TaskFlowPhase = when (item.status) {
             TaskStatus.FINISHED.name -> TaskFlowPhase.REWARD_READY
             "RECEIVED" -> TaskFlowPhase.TERMINAL
-            "TODO" -> if (item.id == "ZHIMA_NPC_VISIT_TASK") TaskFlowPhase.READY_TO_COMPLETE else TaskFlowPhase.BUSINESS_ACTION
+            "TODO" -> if (item.id in setOf("ZHIMA_NPC_VISIT_TASK", "TAOJINBI_NPC_GONGGE_TASK", "TAOJINBI_VIEW_TASK"))
+                TaskFlowPhase.READY_TO_COMPLETE else TaskFlowPhase.BUSINESS_ACTION
             else -> TaskFlowPhase.BUSINESS_ACTION
         }
 
         override fun complete(item: TaskFlowItem): TaskFlowActionResult {
             val bizKey = item.raw?.optString("bizKey").orEmpty()
-            if (item.id != "ZHIMA_NPC_VISIT_TASK" || bizKey != item.id) {
+            if (bizKey.isBlank()) {
                 return TaskFlowActionResult.failure(
                     failureType = TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW,
-                    message = "大表鸽浏览任务业务标识不完整", raw = item.raw.toString(),
+                    message = "NPC浏览任务缺少bizKey", raw = item.raw.toString(),
                     rpc = "AntFarmRpcCall.doFarmTask",
                 )
             }
@@ -7944,42 +8233,38 @@ modelFields.addField(
             if (!ResChecker.checkRes(TAG, response)) {
                 return buildFarmTaskFailureResult(response, item.id, item.title, "doFarmTask", "AntFarmRpcCall.doFarmTask")
             }
-            return TaskFlowActionResult.defer(
-                deferredReason = DeferredReason.STATE_CONFIRMATION,
-                message = "大表鸽浏览任务已提交，回查完成及领奖状态", rpc = "AntFarmRpcCall.doFarmTask",
-                raw = response.toString(), refreshAfterAction = true,
-            )
+            return TaskFlowActionResult.success(refreshAfterAction = true)
         }
 
         override fun receive(item: TaskFlowItem): TaskFlowActionResult {
             val task = item.raw ?: return TaskFlowActionResult.failure(
                 failureType = TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW,
-                message = "大表鸽任务缺少原始数据",
-                rpc = "AntFarmRpcCall.receiveZhimaNpcFarmTaskAward",
+                message = "NPC任务缺少原始数据",
+                rpc = "AntFarmRpcCall.receiveNpcFarmTaskAward",
                 detail = "taskId=${item.id} taskName=${item.title}",
             )
             val awardType = task.optString("awardType")
             if (item.id.isBlank() || awardType.isBlank()) {
                 return TaskFlowActionResult.failure(
                     failureType = TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW,
-                    message = "大表鸽待领奖任务缺少taskId或awardType",
-                    rpc = "AntFarmRpcCall.receiveZhimaNpcFarmTaskAward",
+                    message = "NPC待领奖任务缺少taskId或awardType",
+                    rpc = "AntFarmRpcCall.receiveNpcFarmTaskAward",
                     detail = "taskId=${item.id} taskName=${item.title} awardType=$awardType",
                 )
             }
 
-            val response = AntFarmRpcCall.receiveZhimaNpcFarmTaskAward(item.id, awardType)
+            val response = AntFarmRpcCall.receiveNpcFarmTaskAward(item.id, awardType, config.source, config.taskSceneCode)
             val responseJo = JSONObject(response)
             if (ResChecker.checkRes(TAG, responseJo)) {
-                Log.farm("芝麻大表鸽任务🤖[领取: ${item.title}，奖励: ${task.optInt("awardCount", 0)}芝麻粒]")
+                Log.farm("${config.nickName}任务🤖[领取: ${item.title}，奖励: ${task.optInt("awardCount", 0)} $awardType]")
                 return TaskFlowActionResult.success(refreshAfterAction = true)
             }
             return buildFarmTaskFailureResult(
                 responseJo,
                 item.id,
                 item.title,
-                "receiveZhimaNpcFarmTaskAward",
-                "AntFarmRpcCall.receiveZhimaNpcFarmTaskAward",
+                "receiveNpcFarmTaskAward",
+                "AntFarmRpcCall.receiveNpcFarmTaskAward",
             )
         }
 
@@ -8605,7 +8890,7 @@ modelFields.addField(
                     }
                     // 使用多个时稍微延迟，避免过快
                     if (actualCount > 1 && index < actualCount - 1) {
-                        CoroutineUtils.sleepCompat(1000)
+                        CoroutineUtils.sleepCompat(RandomUtil.nextLong(850, 1001))
                     }
                 }
             }

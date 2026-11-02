@@ -730,31 +730,43 @@ object AntFarmRpcCall {
     fun doSceneTask(
         bizKey: String,
         taskSceneCode: String,
+        originalFailure: TaskFlowActionResult,
         onFailure: (JSONObject) -> TaskFlowActionResult,
     ): TaskFlowActionResult {
         val rpc = "AntFarmRpcCall.doFarmTask"
+        val originalDetail = "originalRpc=${originalFailure.rpc} originalCode=${originalFailure.code} originalRaw=${originalFailure.raw}"
         val raw = doFarmTask(bizKey, taskSceneCode, "RPC")
         val response = JsonUtil.parseJSONObjectOrNull(raw) ?: return TaskFlowActionResult.failure(
             TaskRpcFailureType.RETRYABLE_RPC,
             message = "场景任务请求返回空或无法解析",
             rpc = rpc,
             raw = raw,
+            detail = originalDetail,
             continueCurrentRoundOnFailure = true,
         ).copy(refreshAfterAction = true)
         if (!ResChecker.checkRes(TAG, response)) {
-            val failure = onFailure(response).copy(rpc = rpc, raw = raw, refreshAfterAction = true)
+            val failure = onFailure(response).copy(
+                rpc = rpc, raw = raw, refreshAfterAction = true, detail = originalDetail,
+            )
             if (failure.code == "1009" || failure.code == "331") {
                 return failure.copy(failureType = TaskRpcFailureType.BUSINESS_LIMIT)
+            }
+            if (failure.code == "400000040") {
+                return failure.copy(
+                    failureType = TaskRpcFailureType.NON_RETRYABLE_INVALID,
+                    continueCurrentRoundOnFailure = true,
+                    stopCurrentRound = false,
+                )
             }
             // 保留失败语义；后续列表确认进展时由统一任务执行流程消解失败。
             return failure
         }
         return TaskFlowActionResult.defer(
             DeferredReason.STATE_CONFIRMATION,
-            message = "场景任务请求已发送，等待所属任务列表确认",
+            message = "场景任务已受理，等待所属任务列表确认",
             rpc = rpc,
             raw = raw,
-            detail = "taskSceneCode=$taskSceneCode bizKey=$bizKey",
+            detail = "$originalDetail taskSceneCode=$taskSceneCode bizKey=$bizKey",
             refreshAfterAction = true,
         )
     }
@@ -1174,32 +1186,43 @@ object AntFarmRpcCall {
         return requestString("com.alipay.antfarm.sendBackAnimal", "[$args]")
     }
 
-    /**
-     * 获取芝麻NPC任务列表
-     */
     @JvmStatic
-    fun listZhimaNpcFarmTask(): String {
-        val args =
-            "[{\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"zhimaxiaoji_lianjin\",\"taskSceneCode\":\"ANTFARM_ZHIMA_NPC_TASK\",\"version\":\"$VERSION\"}]"
-        return requestString("com.alipay.antfarm.listFarmTask", args)
-    }
+    fun npcVisitAnimal(): String = requestString(
+        "com.alipay.antfarm.npcVisitAnimal",
+        JSONArray().put(JSONObject().put("requestType", "NORMAL").put("sceneCode", "ANTFARM")
+            .put("source", "H5").put("version", VERSION)).toString(),
+    )
 
-    /**
-     * 领取芝麻NPC任务奖励
-     */
     @JvmStatic
-    fun receiveZhimaNpcFarmTaskAward(
+    fun npcVisitAnimalReport(animalId: String, actionType: String): String = requestString(
+        "com.alipay.antfarm.npcVisitAnimalReport",
+        JSONArray().put(JSONObject().put("animalId", animalId).put("actionType", actionType)
+            .put("reportTime", System.currentTimeMillis()).put("requestType", "NORMAL")
+            .put("sceneCode", "ANTFARM").put("source", "H5").put("version", VERSION)).toString(),
+    )
+
+    @JvmStatic
+    fun listNpcFarmTask(source: String, taskSceneCode: String): String = requestString(
+        "com.alipay.antfarm.listFarmTask",
+        JSONArray().put(JSONObject().put("requestType", "NORMAL").put("sceneCode", "ANTFARM")
+            .put("source", source).put("taskSceneCode", taskSceneCode).put("version", VERSION)).toString(),
+    )
+
+    @JvmStatic
+    fun receiveNpcFarmTaskAward(
         taskId: String,
         awardType: String,
+        source: String,
+        taskSceneCode: String,
     ): String {
         val args =
             JSONObject().apply {
                 put("awardType", awardType)
                 put("requestType", "NORMAL")
                 put("sceneCode", "ANTFARM")
-                put("source", "zhimaxiaoji_lianjin")
+                put("source", source)
                 put("taskId", taskId)
-                put("taskSceneCode", "ANTFARM_ZHIMA_NPC_TASK")
+                put("taskSceneCode", taskSceneCode)
                 put("version", VERSION)
             }
         return requestString("com.alipay.antfarm.receiveFarmTaskAward", JSONArray().put(args).toString())

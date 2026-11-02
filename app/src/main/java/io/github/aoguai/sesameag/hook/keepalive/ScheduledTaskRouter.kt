@@ -14,11 +14,13 @@ import io.github.aoguai.sesameag.task.antFarm.AntFarm
 import io.github.aoguai.sesameag.task.antForest.EnergyWaitingManager
 import io.github.aoguai.sesameag.task.antForest.AntForest
 import io.github.aoguai.sesameag.task.antForest.FOREST_PLANT_CHILD_KIND
+import io.github.aoguai.sesameag.task.antForest.FOREST_READ_CHILD_KIND
 import io.github.aoguai.sesameag.task.antMember.AntMember
 import io.github.aoguai.sesameag.task.antOrchard.AntOrchard
 import io.github.aoguai.sesameag.task.antSesameCredit.AntSesameCredit
 import io.github.aoguai.sesameag.task.antSports.AntSports
 import io.github.aoguai.sesameag.task.antStall.AntStall
+import io.github.aoguai.sesameag.task.goldenBean.GoldenBeanTreasure
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
@@ -27,9 +29,11 @@ import io.github.aoguai.sesameag.util.maps.UserMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.runInterruptible
+import io.github.aoguai.sesameag.util.SerialTaskQueue
 import org.json.JSONObject
 
 object ScheduledTaskRouter {
@@ -50,83 +54,96 @@ object ScheduledTaskRouter {
     }
 
     private val moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val deliveryMutex = Mutex()
+    private val deliveries = SerialTaskQueue()
 
-    suspend fun fireDueFromModule(context: Context, source: String): Int = deliveryMutex.withLock {
+    suspend fun fireDueFromModule(context: Context, source: String): Int = deliveries.submit {
         val now = System.currentTimeMillis()
-        val due = PersistentScheduleRegistry.listFresh().filter {
-            it.state == PersistentScheduleState.SCHEDULED && it.triggerAtMs <= now
-        }.sortedBy { it.deadlineAtMs() }
+        val due = runInterruptible {
+            PersistentScheduleRegistry.listFresh().filter {
+                it.state == PersistentScheduleState.SCHEDULED && it.triggerAtMs <= now
+            }.sortedBy { it.deadlineAtMs() }
+        }
         try {
-            val deliverable = due.filter { schedule ->
-                when {
-                    now > schedule.deadlineAtMs() -> {
-                        PersistentScheduleRegistry.markExpired(context, schedule.id, now, source)
-                        false
-                    }
-                    schedule.lastError in setOf("launch_pending", "delivery_pending") -> {
-                        if (schedule.lastError == "launch_pending") {
-                            recordLaunchFailure(schedule, IllegalStateException("launch_unconfirmed"))
+            val deliverable = runInterruptible {
+                due.filter { schedule ->
+                    when {
+                        now > schedule.deadlineAtMs() -> {
+                            PersistentScheduleRegistry.markExpired(context, schedule.id, now, source)
+                            false
                         }
-                        PersistentScheduleRegistry.rescheduleDeferred(
-                            context, schedule.id, "${schedule.lastError}_timeout", now, expected = schedule,
-                        )
-                        false
+                        schedule.lastError in setOf("launch_pending", "delivery_pending") -> {
+                            if (schedule.lastError == "launch_pending") {
+                                recordLaunchFailure(schedule, IllegalStateException("launch_unconfirmed"))
+                            }
+                            PersistentScheduleRegistry.rescheduleDeferred(
+                                context, schedule.id, "${schedule.lastError}_timeout", now, expected = schedule,
+                            )
+                            false
+                        }
+                        else -> true
                     }
-                    else -> true
                 }
             }
-            if (deliverable.isEmpty()) return@withLock due.size
-            val identity = AccountSessionCoordinator.currentOrPersistedSessionIdentity()
-            val readiness = HookReadyChecker.probe(context, identity?.userId.orEmpty())
-            var launchAttempted = PersistentScheduleRegistry.listFresh().any {
-                it.state == PersistentScheduleState.SCHEDULED && it.lastError == "launch_pending"
+            if (deliverable.isEmpty()) return@submit due.size
+            val identity = runInterruptible { AccountSessionCoordinator.currentOrPersistedSessionIdentity() }
+            val readiness = runInterruptible { HookReadyChecker.probe(context, identity?.userId.orEmpty()) }
+            var launchAttempted = runInterruptible {
+                PersistentScheduleRegistry.listFresh().any {
+                    it.state == PersistentScheduleState.SCHEDULED && it.lastError == "launch_pending"
+                }
             }
             for (schedule in deliverable) {
-                if (identity == null || schedule.ownerUserId != identity.userId || schedule.sessionEpoch != identity.sessionEpoch) {
-                    PersistentScheduleRegistry.markFailed(context, schedule.id, "session_mismatch", source = source, expected = schedule)
-                    continue
-                }
-                if (readiness.replied) {
-                    if (readiness.currentUserId.isNotBlank() && readiness.currentUserId != schedule.ownerUserId ||
-                        readiness.sessionEpoch > 0L && readiness.sessionEpoch != schedule.sessionEpoch
-                    ) {
-                        PersistentScheduleRegistry.markFailed(context, schedule.id, "target_session_mismatch", source = source, expected = schedule)
-                    } else if (readiness.ready && readiness.workflowReady &&
-                        readiness.currentUserId == schedule.ownerUserId && readiness.sessionEpoch == schedule.sessionEpoch
-                    ) {
-                        val waiting = PersistentScheduleRegistry.beginDeliveryWait(context, schedule, launching = false) ?: continue
-                        val intent = Intent(ApplicationHookConstants.BroadcastActions.EXECUTE).apply {
-                            setPackage(General.PACKAGE_NAME)
-                            putExtra(EXTRA_PERSISTENT_ID, waiting.id)
-                            putExtra(SystemWakeScheduler.EXTRA_CONFIRMATION_AT, waiting.updatedAtMs)
-                        }
-                        if (!sendTargetBroadcast(context, intent, waiting, source)) {
-                            PersistentScheduleRegistry.rescheduleDeferred(context, waiting.id, "broadcast_failed", expected = waiting)
-                        }
-                    } else {
-                        PersistentScheduleRegistry.rescheduleDeferred(
-                            context, schedule.id, "target_not_ready:${readiness.message}", expected = schedule,
-                        )
+                val waiting = runInterruptible {
+                    if (identity == null || schedule.ownerUserId != identity.userId || schedule.sessionEpoch != identity.sessionEpoch) {
+                        PersistentScheduleRegistry.markFailed(context, schedule.id, "session_mismatch", source = source, expected = schedule)
+                        return@runInterruptible null
                     }
-                    continue
-                }
-                if (launchAttempted || !shouldLaunchTarget(schedule) || !consumeLaunchQuota(schedule)) {
-                    PersistentScheduleRegistry.rescheduleDeferred(
-                        context, schedule.id, "target_unavailable_or_launch_disabled", expected = schedule,
-                    )
-                    continue
-                }
-                launchAttempted = true
-                val waiting = PersistentScheduleRegistry.beginDeliveryWait(context, schedule, launching = true) ?: continue
+                    if (readiness.replied) {
+                        if (readiness.currentUserId.isNotBlank() && readiness.currentUserId != schedule.ownerUserId ||
+                            readiness.sessionEpoch > 0L && readiness.sessionEpoch != schedule.sessionEpoch
+                        ) {
+                            PersistentScheduleRegistry.markFailed(context, schedule.id, "target_session_mismatch", source = source, expected = schedule)
+                        } else if (readiness.ready && readiness.workflowReady &&
+                            readiness.currentUserId == schedule.ownerUserId && readiness.sessionEpoch == schedule.sessionEpoch
+                        ) {
+                            val delivery = PersistentScheduleRegistry.beginDeliveryWait(context, schedule, launching = false)
+                                ?: return@runInterruptible null
+                            val intent = Intent(ApplicationHookConstants.BroadcastActions.EXECUTE).apply {
+                                setPackage(General.PACKAGE_NAME)
+                                putExtra(EXTRA_PERSISTENT_ID, delivery.id)
+                                putExtra(SystemWakeScheduler.EXTRA_CONFIRMATION_AT, delivery.updatedAtMs)
+                            }
+                            if (!sendTargetBroadcast(context, intent, delivery, source)) {
+                                PersistentScheduleRegistry.rescheduleDeferred(context, delivery.id, "broadcast_failed", expected = delivery)
+                            }
+                        } else {
+                            PersistentScheduleRegistry.rescheduleDeferred(
+                                context, schedule.id, "target_not_ready:${readiness.message}", expected = schedule,
+                            )
+                        }
+                        return@runInterruptible null
+                    }
+                    if (launchAttempted || !shouldLaunchTarget(schedule) || !consumeLaunchQuota(schedule)) {
+                        PersistentScheduleRegistry.rescheduleDeferred(
+                            context, schedule.id, "target_unavailable_or_launch_disabled", expected = schedule,
+                        )
+                        return@runInterruptible null
+                    }
+                    launchAttempted = true
+                    PersistentScheduleRegistry.beginDeliveryWait(context, schedule, launching = true)
+                } ?: continue
                 if (!SystemWakeScheduler.launchTargetNow(context, waiting)) {
-                    recordLaunchFailure(waiting, IllegalStateException("target_launch_failed"))
-                    PersistentScheduleRegistry.rescheduleDeferred(context, waiting.id, "target_launch_failed", expected = waiting)
+                    runInterruptible {
+                        recordLaunchFailure(waiting, IllegalStateException("target_launch_failed"))
+                        PersistentScheduleRegistry.rescheduleDeferred(context, waiting.id, "target_launch_failed", expected = waiting)
+                    }
                 }
             }
             due.size
         } finally {
-            SystemWakeScheduler.refresh(context)
+            if (currentCoroutineContext().isActive) {
+                runInterruptible { SystemWakeScheduler.refresh(context) }
+            }
         }
     }
 
@@ -366,6 +383,16 @@ object ScheduledTaskRouter {
             }
             return routeResult(dispatchExecute(context, schedule, source, wakenAtTime = false, wakenTime = null))
         }
+        if (childKind == FOREST_READ_CHILD_KIND) {
+            if (targetProcess) {
+                val forest = Model.getModel(AntForest::class.java) ?: return RouteResult.DEFERRED
+                if (!forest.isEnable() || forest.forestRead?.value != true) return RouteResult.SKIPPED
+                return if (forest.triggerPersistentReadTask(schedule.payloadJson, schedule.id, source)) {
+                    RouteResult.HANDLED
+                } else RouteResult.FAILED
+            }
+            return routeResult(dispatchExecute(context, schedule, source, wakenAtTime = false, wakenTime = null))
+        }
         if (childKind == FOREST_PLANT_CHILD_KIND) {
             if (targetProcess) {
                 val forest = Model.getModel(AntForest::class.java) ?: return RouteResult.DEFERRED
@@ -398,6 +425,16 @@ object ScheduledTaskRouter {
             }
             return routeResult(dispatchExecute(context, schedule, source, wakenAtTime = false, wakenTime = null))
         }
+        if (childKind == GoldenBeanTreasure.PERSISTENT_CHILD_KIND) {
+            if (targetProcess) {
+                val goldenBean = Model.getModel(GoldenBeanTreasure::class.java) ?: return RouteResult.DEFERRED
+                if (!goldenBean.isEnable() || goldenBean.goldenBeanTreasure.value != true) return RouteResult.SKIPPED
+                return if (goldenBean.triggerPersistentGoldenBeanTasks(schedule.payloadJson, schedule.id, source)) {
+                    RouteResult.HANDLED
+                } else RouteResult.FAILED
+            }
+            return routeResult(dispatchExecute(context, schedule, source, wakenAtTime = false, wakenTime = null))
+        }
         if (childKind == AntSesameCredit.PERSISTENT_CONFIRMATION_KIND) {
             if (targetProcess) {
                 val sesame = Model.getModel(AntSesameCredit::class.java) ?: return RouteResult.DEFERRED
@@ -410,7 +447,7 @@ object ScheduledTaskRouter {
         }
         if (childKind == AntDodo.PERSISTENT_CHILD_KIND) {
             val childId = payload.optString("child_id").trim()
-            if (childId != AntDodo.COLLECT_TO_FRIEND_CHILD_ID) {
+            if (childId !in setOf(AntDodo.COLLECT_TO_FRIEND_CHILD_ID, AntDodo.TASK_FLOW_CHILD_ID)) {
                 Log.record(TAG, "神奇物种持久子任务缺少或未知 child_id: ${schedule.name}")
                 return RouteResult.FAILED
             }
@@ -421,7 +458,12 @@ object ScheduledTaskRouter {
                         Log.record(TAG, "神奇物种持久子任务触发时模块已关闭，标记完成: ${schedule.name}")
                         return RouteResult.SKIPPED
                     }
-                    return if (antDodo.triggerPersistentCollectToFriend(schedule.payloadJson, schedule.id, source)) {
+                    val handled = if (childId == AntDodo.TASK_FLOW_CHILD_ID) {
+                        antDodo.triggerPersistentTaskFlow(schedule.payloadJson, schedule.id, source)
+                    } else {
+                        antDodo.triggerPersistentCollectToFriend(schedule.payloadJson, schedule.id, source)
+                    }
+                    return if (handled) {
                         RouteResult.HANDLED
                     } else {
                         RouteResult.FAILED

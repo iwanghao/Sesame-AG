@@ -3,9 +3,9 @@ package io.github.aoguai.sesameag.hook.keepalive
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import io.github.aoguai.sesameag.hook.ApplicationHookConstants
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.WakeLockManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,20 +44,20 @@ class ScheduledTriggerReceiver : BroadcastReceiver() {
             )
         receiverScope.launch {
             try {
+                // 限制单次闹钟广播的异步处理时间，便于结束广播和释放唤醒锁；不是业务睡眠。
                 withTimeout(RECEIVER_TIMEOUT_MS) {
                     val source = if (plannedBatch) "alarm_batch" else "alarm"
                     val dueCount = ScheduledTaskRouter.fireDueFromModule(ctx, source)
                     Log.record(TAG, "系统闹钟到达[id=$scheduleId] source=$source 已处理计划数=$dueCount")
                 }
             } catch (_: TimeoutCancellationException) {
-                Log.record(
-                    TAG,
-                    "持久调度广播处理超时[$scheduleId] pending=${ApplicationHookConstants.pendingTriggerCount()}",
-                )
+                android.util.Log.w(TAG, "持久调度广播处理超时[$scheduleId]")
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
-                Log.printStackTrace(TAG, "持久调度广播处理失败[$scheduleId]", t)
+                android.util.Log.e(TAG, "持久调度广播处理失败[$scheduleId]", t)
             } finally {
-                wakeLock.close()
+                runCatching { wakeLock.close() }
                 runCatching { pendingResult.finish() }
             }
         }

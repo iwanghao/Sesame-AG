@@ -16,7 +16,6 @@ import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -139,7 +138,6 @@ object FarmGame {
                     AntFarm.instance?.let { it.syncAnimalStatus(it.ownerFarmId) }
                     val awardStr = parseGameAward(joRecord)
                     Log.farm("庄园游戏🎮[${gameType.gameName()}]#$awardStr")
-                    delay(3000)
 
                     val afterSnapshot = queryFarmGameSnapshot(gameType) ?: return FarmGameCompletion.UNCONFIRMED
                     if (!hasConfirmedGameProgress(beforeSnapshot, afterSnapshot)) {
@@ -195,7 +193,6 @@ object FarmGame {
         }
         val award = parseGameAward(recordResponse)
         Log.farm("庄园游戏🎮[${gameType.gameName()}]#$award")
-        delay(3000)
 
         val afterSnapshot = queryFarmGameSnapshot(gameType) ?: return FarmGameCompletion.UNCONFIRMED
         return when (afterSnapshot.level3Get) {
@@ -327,7 +324,7 @@ object FarmGame {
             }
             override fun logInfo(message: String) = Log.farm(message)
             override fun logError(message: String) = Log.error(TAG, message)
-        }, roundSleepMs = 300L).run()
+        }, roundSleepMs = 255L).run()
         return when {
             !result.completed -> GameTaskHandlingResult.UNCONFIRMED
             result.progressChanged -> GameTaskHandlingResult.CONFIRMED_PROGRESS
@@ -587,9 +584,9 @@ object FarmGame {
                     item.id.isBlank() -> TaskFlowPhase.UNKNOWN
                     else -> when (item.status) {
                         "FINISHED" -> TaskFlowPhase.REWARD_READY
-                        "RECEIVED" -> if (item.actionType == "VIEW" && item.limit != null &&
+                        "RECEIVED" -> if (item.actionType in setOf("VIEW", "COUNT_DOWN") && item.limit != null &&
                             (item.current ?: 0) < item.limit) TaskFlowPhase.READY_TO_COMPLETE else TaskFlowPhase.TERMINAL
-                        "TODO" -> if (item.actionType == "VIEW") TaskFlowPhase.READY_TO_COMPLETE else TaskFlowPhase.BUSINESS_ACTION
+                        "TODO" -> if (item.actionType in setOf("VIEW", "COUNT_DOWN")) TaskFlowPhase.READY_TO_COMPLETE else TaskFlowPhase.BUSINESS_ACTION
                         else -> TaskFlowPhase.UNKNOWN
                     }
                 }
@@ -636,10 +633,6 @@ object FarmGame {
                         raw = response.toString(), rpc = "com.alipay.antieptask.receiveTaskAwardantfarm",
                         continueCurrentRoundOnFailure = true,
                     ).copy(refreshAfterAction = true)
-                }
-
-                override fun onQueryFailed(response: JSONObject) {
-                    Log.error(TAG, "小鸡乐园任务查询失败:$response")
                 }
 
                 override fun logInfo(message: String) = Log.farm(message)

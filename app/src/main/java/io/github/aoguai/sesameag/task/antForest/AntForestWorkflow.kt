@@ -4,7 +4,6 @@ import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeCounter
 import io.github.aoguai.sesameag.util.maps.UserMap
 import org.json.JSONObject
-import kotlinx.coroutines.sync.withLock
 
 private val FOREST_TAG: String = AntForest::class.java.simpleName
 
@@ -36,7 +35,12 @@ internal suspend fun AntForest.runForestPreparationAndCollectionWorkflow(tc: Tim
 
     val collectEnergyEnabled = isCollectEnergyEnabled()
 
-    var selfHomeObj = latestHomeAfterProps ?: initialHome
+    // 加速器可能已立即收走能量，不能将其收取前的主页快照再次用于收取。
+    var selfHomeObj = if (collectEnergyEnabled && latestHomeAfterProps != null) {
+        querySelfHome()
+    } else {
+        latestHomeAfterProps ?: initialHome
+    }
     if (selfHomeObj != null) {
         if (collectEnergyEnabled) {
             collectEnergy(UserMap.currentUid, selfHomeObj, "self")
@@ -175,7 +179,7 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(
 
     if (receiveForestTaskAward?.value == true) {
         receiveTaskAward()
-        plantTaskMutex.withLock {
+        plantTaskQueue.submit {
             waterMemberPlant()
             runMemberPlantTasks()
         }
@@ -248,8 +252,10 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(
     }
 
 
+    if (forestDailyDress?.value == true) ForestDress.run()
+    if (forestRead?.value == true) runForestReadWorkflow()
     if (forestChouChouLe?.value == true) {
-        ForestChouChouLe().chouChouLe()
+        ForestChouChouLe(forestCharityWater?.value == true && isForestWateringEnabled()).chouChouLe()
         tc.countDebug("抽抽乐")
     }
 

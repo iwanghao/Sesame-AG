@@ -1,6 +1,14 @@
 package io.github.aoguai.sesameag.task.antOrchard
 
 import io.github.aoguai.sesameag.hook.RequestManager
+import io.github.aoguai.sesameag.hook.ApplicationHook
+import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.rpc.RpcDailyCircuit
+import io.github.aoguai.sesameag.hook.rpc.capture.RpcTrafficCapture
+import io.github.aoguai.sesameag.hook.rpc.intervallimit.RpcIntervalLimit
+import io.github.aoguai.sesameag.task.TaskExecutionReport
+import io.github.aoguai.sesameag.util.RpcOfflineRisk
+import io.github.aoguai.sesameag.util.WorkflowRootGuard
 import io.github.aoguai.sesameag.util.RandomUtil
 import org.json.JSONArray
 import org.json.JSONObject
@@ -66,6 +74,60 @@ object AntOrchardRpcCall {
             "com.alipay.antfarm.orchardIndex",
             JSONArray().put(requestData).toString(),
         )
+    }
+
+    fun orchardSeedList(): String = RequestManager.requestString(
+        "com.alipay.antfarm.orchardSeedList",
+        JSONArray().put(JSONObject().put("from", "SEED_LIST").put("page", 0)
+            .put("requestType", "NORMAL").put("sceneCode", "ORCHARD")
+            .put("source", ENTRY_SOURCE).put("version", VERSION)).toString(),
+    )
+
+    fun orchardSelectSeed(seedCode: String): String = RequestManager.requestString(
+        "com.alipay.antfarm.orchardSelectSeed",
+        JSONArray().put(JSONObject().put("seedCode", seedCode).put("requestType", "NORMAL")
+            .put("sceneCode", "ORCHARD").put("source", ENTRY_SOURCE).put("version", VERSION)).toString(),
+    )
+
+    fun orchardGrownRecords(): JSONObject? {
+        val method = "mtop.tmall.farm.commonapi.get"
+        val identity = RpcDailyCircuit.captureIdentity()
+        TaskExecutionReport.current()?.ensureSessionActive()
+        return RpcIntervalLimit.dispatch(method) {
+            if (!RpcDailyCircuit.isSameSession(identity) || ApplicationHookConstants.shouldBlockRpc() ||
+                RpcDailyCircuit.isBlockedToday(identity.userId, method) || !WorkflowRootGuard.isExecutionAllowed()
+            ) return@dispatch null
+            val loader = ApplicationHook.classLoader ?: return@dispatch null
+            val agentClass = Class.forName("com.alipay.mobile.framework.LauncherApplicationAgent", false, loader)
+            val agent = agentClass.getMethod("getInstance").invoke(null)
+            val context = agent.javaClass.getMethod("getMicroApplicationContext").invoke(agent)
+            val service = context.javaClass.getMethod("findServiceByInterface", String::class.java)
+                .invoke(context, "com.alipay.android.phone.mobilesdk.mtop.MtopService") ?: return@dispatch null
+            val jsonClass = Class.forName("com.alibaba.fastjson.JSONObject", false, loader)
+            val payload = JSONObject().put("bizParam", "{}").put("bizType", "plantTree.showFruitList").toString()
+            val args = linkedMapOf<String, Any>(
+                "apiName" to method, "apiVersion" to "1.0", "dataText" to payload,
+                "type" to "originaljson", "timeout" to 15000, "needHttps" to true,
+                "needSpdy" to true, "needWua" to false, "needEcodeSign" to false,
+                "shouldSkipAutoLogin" to false, "ignore_aliauth_autologin" to false,
+                "isvOpenAppkey" to "DEFAULT_AUTH", "isvAccessToken" to "", "customHost" to "",
+                "ttid" to "", "tb_eagleeyex_scm_project" to "",
+                "headers" to jsonClass.getDeclaredConstructor().newInstance(),
+                "usePost" to Class.forName("mtopsdk.mtop.domain.MethodEnum", false, loader).getField("GET").get(null),
+            )
+            if (!RpcDailyCircuit.isSameSession(identity) || ApplicationHookConstants.shouldBlockRpc()) return@dispatch null
+            val call = service.javaClass.getMethod("syncRequestFastJson", Map::class.java)
+            val startedAt = System.currentTimeMillis()
+            val requestId = RpcTrafficCapture.recordModuleRequest(method, payload)
+            val pair = call.invoke(service, args) ?: return@dispatch null
+            val raw = pair.javaClass.getField("second").get(pair)?.toString() ?: return@dispatch null
+            RpcTrafficCapture.recordModuleResponse(method, raw, System.currentTimeMillis() - startedAt, requestId, null)
+            if (!RpcDailyCircuit.isCurrent(identity)) return@dispatch null
+            val response = JSONObject(raw)
+            if (RpcOfflineRisk.isHardBlocked(response)) RpcDailyCircuit.markBlockedToday(identity, method)
+            RpcOfflineRisk.enterOfflineIfNeeded("AntOrchard.grownRecords", response)
+            response
+        }
     }
 
     /**
@@ -468,14 +530,51 @@ object AntOrchardRpcCall {
         )
     }
 
-    fun noticeGame(appId: String): String {
+    fun orchardIndexFeeds(): String = RequestManager.requestString(
+        "com.alipay.antorchard.indexFeeds",
+        JSONArray().put(JSONObject().put("pageNum", 1).put("requestType", "NORMAL")
+            .put("sceneCode", "ORCHARD").put("source", ENTRY_SOURCE).put("version", VERSION)
+            .put("filterItemList", JSONArray()
+                .put(JSONObject().put("itemType", "qianyi").put("itemIdList", JSONArray()))
+                .put(JSONObject().put("itemType", "game").put("itemIdList", JSONArray())))).toString(),
+    )
+
+    fun orchardIndexDelivery(): String = RequestManager.requestString(
+        "com.alipay.antorchard.orchardIndexDelivery",
+        JSONArray().put(JSONObject().put("requestType", "NORMAL").put("sceneCode", "ORCHARD")
+            .put("source", ENTRY_SOURCE).put("version", VERSION)).toString(),
+    )
+
+    fun enterHomeGame(appId: String): String = RequestManager.requestString(
+        "com.alipay.gamecenteruprod.biz.rpc.v3.submitUserAction",
+        JSONArray().put(JSONObject().put("actionCode", "enterGame").put("gameId", appId)
+            .put("source", "gameFramework")).toString(),
+    )
+
+    fun reportHomeGameEvent(appId: String, eventId: String, eventKey: String, elapsedMs: Long = 0): String {
+        val attributes = JSONObject().put("CH_INFO", "lianyun_nc_sydb")
+            .put("PLAY_SCENE", "NORMAL").put("SCENE_ID", "nongchangleyuan")
+        if (eventId == "GAME_FIRST_FRAME") attributes.put("ALIVE_ENTER", "0")
+        // 此键保留目标应用客户端的协议拼写，已由实际 submitEvent 请求及成功响应确认。
+        if (elapsedMs > 0) attributes.put("GAME_ELAPASED_TIME", elapsedMs)
+        val source = when (eventId) {
+            "GAME_FIRST_FRAME" -> "paladinx_auto"
+            "loading_completed" -> "my.reportLoadingCompleted"
+            else -> "my.reportGamePlay"
+        }
+        return RequestManager.requestString("com.alipay.gameevent.biz.rpc.submitEvent",
+            JSONArray().put(JSONObject().put("appId", appId).put("eventId", eventId)
+                .put("eventAttrMap", attributes).put("idempotentNo", eventKey).put("source", source)).toString())
+    }
+
+    fun noticeGame(appId: String, source: String = ACTION_SOURCE): String {
         val jsonArgs =
             """
              [{
                 "appId": "$appId",
                 "requestType": "NORMAL",
                 "sceneCode": "ORCHARD",
-                "source": "$ACTION_SOURCE",
+                "source": "$source",
                 "version": "$VERSION"
             }]
             """.trimIndent()

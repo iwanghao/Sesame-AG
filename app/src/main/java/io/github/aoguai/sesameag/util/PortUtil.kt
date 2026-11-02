@@ -31,7 +31,7 @@ object PortUtil {
         }
         try {
             val json = SettingsTransferExporter.exportJson(userId, exportMode)
-            val outputStream = context.contentResolver.openOutputStream(uri)
+            val outputStream = context.contentResolver.openOutputStream(uri, "wt")
             if (outputStream == null) {
                 ToastUtil.showToast("导出失败：无法写入所选位置")
                 return false
@@ -40,15 +40,17 @@ object PortUtil {
             outputStream.use { output ->
                 output.write(json.toByteArray(Charsets.UTF_8))
                 output.flush()
-                ToastUtil.showToast("导出成功")
-                return true
             }
+            val saved = checkNotNull(context.contentResolver.openInputStream(uri)) { "无法校验导出文件" }
+                .bufferedReader(Charsets.UTF_8).use { it.readText() }
+            check(saved == json) { "导出文件写入不完整" }
+            ToastUtil.showToast("导出成功")
+            return true
         } catch (e: Throwable) {
             Log.printStackTrace(e)
             ToastUtil.showToast("导出失败，请稍后重试")
             return false
         }
-        return false
     }
 
     @JvmStatic
@@ -85,7 +87,8 @@ object PortUtil {
 
     private suspend fun notifyConfigReload(context: Context, userId: String?): String {
         if (userId.isNullOrBlank()) return "默认配置已保存"
-        val unconfirmed = "设置已保存，尚未确认运行态，请在支付宝中重新加载配置"
+        val unconfirmed = "设置已保存，尚未确认运行态，请在目标应用中重新加载配置"
+        // 配置已保存后最多等待八秒确认宿主运行态已重载；超时返回未确认提示，不延后保存本身。
         return withTimeoutOrNull(8_000L) {
             suspendCancellableCoroutine<String> { continuation ->
                 val receiver = object : ResultReceiver(null) {

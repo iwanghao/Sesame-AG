@@ -110,9 +110,8 @@ object EnergyRainCoroutine {
             val timeSinceLastExec = currentTime - lastExecuteTime
             val cooldownSeconds = 3 // 冷却时间：3秒
 
-            if (timeSinceLastExec < cooldownSeconds * 1000) {
-                // 粗放点，delay 3秒
-                delay(cooldownSeconds * 1000.toLong())
+            if (timeSinceLastExec < cooldownSeconds * 1000L) {
+                delay(cooldownSeconds * 1000L - timeSinceLastExec)
             }
 
             val executed = energyRain(isManual, gameTaskCloser)
@@ -148,7 +147,7 @@ object EnergyRainCoroutine {
 
             do {
                 val joEnergyRainHome = JSONObject(AntForestRpcCall.queryEnergyRainHome())
-                randomDelay(250, 400) // 随机延迟 300-400ms
+                randomDelay(250, 400) // 保留能量雨的请求节奏抖动，错开连续主页回查（250–400ms）
                 if (!ResChecker.checkRes(TAG, joEnergyRainHome)) {
                     Log.forest("查询能量雨状态失败")
                     break
@@ -173,7 +172,7 @@ object EnergyRainCoroutine {
                     pendingGameTaskRecheck = false
                     if (startEnergyRain() == EnergyRainGameExecutionResult.CONFIRMED_DONE) {
                         playedCount++
-                        randomDelay(3000, 5000) // 随机延迟3-5秒
+                        randomDelay(3000, 5000) // 完成一局后保留能量雨的局间随机间隔，避免立即连续开局
                         shouldRunPostFlow = true
                         worked = true
                     }
@@ -246,7 +245,7 @@ object EnergyRainCoroutine {
                                             )
                                         }",
                                     )
-                                    randomDelay(300, 400) // 随机延迟 300-400ms
+                                    randomDelay(300, 400) // 赠送成功后保留能量雨的随机请求间隔，再回查赠送和开局状态
                                     granted = true
                                     break
                                 } else {
@@ -296,7 +295,7 @@ object EnergyRainCoroutine {
                             if (!isManual) {
                                 Status.setFlagToday(energyRainGameFlag)
                             }
-                            randomDelay(3000, 5000) // 随机延迟3-5秒
+                            randomDelay(3000, 5000) // 机会任务完成后保留局间随机间隔，避免立即连续推进下一轮
                             playedCount++
                             shouldRunPostFlow = true
                             worked = true
@@ -304,6 +303,7 @@ object EnergyRainCoroutine {
                             pendingGameTaskRecheck = true
                             Log.forest("能量雨游戏任务已推进，当前轮次继续回查")
                             worked = true
+                            // 任务已推进但尚未闭环，保留随机状态回查缓冲，不立即连续查询。
                             randomDelay(1500, 2500)
                         } else if (taskResult == TaskResult.ALREADY_DONE) {
                             pendingGameTaskRecheck = false
@@ -316,6 +316,7 @@ object EnergyRainCoroutine {
                             pendingGameTaskRecheck = true
                             worked = true
                             Log.forest("能量雨机会任务服务端仍在准备，延迟后进行一次回查")
+                            // 服务端仍在准备时保留一次随机退避；上方标记限制本轮只进行一次补查。
                             randomDelay(1500, 2500)
                         } else if (taskResult == TaskResult.RETRY_LATER) {
                             pendingGameTaskRecheck = false
@@ -380,7 +381,7 @@ object EnergyRainCoroutine {
                     val s = "收获能量雨🌧️[${sum}g]"
                     Toast.show(s)
                     Log.forest(s)
-                    randomDelay(300, 400) // 随机延迟 300-400ms
+                    randomDelay(300, 400) // 结算成功后保留能量雨的随机请求间隔，再交回外层流程
                     return EnergyRainGameExecutionResult.CONFIRMED_DONE
                 }
                 val failure = classifyEnergyRainRpcFailure(resultJson)
@@ -684,6 +685,7 @@ object EnergyRainCoroutine {
                         return failure
                     }
                     Log.forest("能量雨机会任务[${candidate.taskTitle}]入口已初始化，准备点击游戏入口")
+                    // 初始化任务后保留入口操作的随机间隔，避免初始化与点击请求紧邻发出。
                     randomDelay(800, 1500)
                 } else {
                     Log.forest("能量雨机会任务[${candidate.taskTitle}]无需初始化，准备点击游戏入口")
@@ -706,6 +708,7 @@ object EnergyRainCoroutine {
                         return failure
                     }
                     Log.forest("能量雨游戏入口点击成功，检查是否生成机会")
+                    // 点击游戏入口后留出机会状态生成的本地缓冲，再回查能否开局。
                     randomDelay(2000, 3000)
                     when (val playResult = queryAndPlayEnergyRainChance(candidate, "入口点击后")) {
                         EnergyRainGameExecutionResult.CONFIRMED_DONE -> {
@@ -778,6 +781,7 @@ object EnergyRainCoroutine {
                     Unit
                 }
             }
+            // 游戏链路结束后保留随机回查间隔，再读取机会任务的最终状态。
             randomDelay(1000, 2000)
 
             val verifyResponse = JSONObject(AntForestRpcCall.queryEnergyRainEndGameList())

@@ -16,11 +16,13 @@ import io.github.aoguai.sesameag.util.RandomUtil
 import io.github.aoguai.sesameag.util.RpcOfflineRisk
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.WorkflowRootGuard
+import kotlinx.coroutines.CancellationException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 private fun truncateForLog(
     value: String?,
@@ -128,11 +130,11 @@ class AriverRpcBridge : RpcBridge {
     private val nullResponseLogIntervalMs = NULL_RESPONSE_LOG_INTERVAL_MS
 
     private data class ErrorSummaryWindowStat(
-        var windowStartMs: Long,
-        var count: Int,
+        val windowStartMs: Long,
+        val count: Int,
     )
 
-    private val errorSummaryWindowStats = ConcurrentHashMap<String, ErrorSummaryWindowStat>()
+    private val errorSummaryWindowStats = ConcurrentHashMap<String, AtomicReference<ErrorSummaryWindowStat>>()
     private val errorSummaryWindowMs = ERROR_SUMMARY_WINDOW_MS
     private val lastErrorNotifyAtMs = AtomicLong(0)
     private val errorNotifyIntervalMs = ERROR_NOTIFY_INTERVAL_MS
@@ -144,6 +146,7 @@ class AriverRpcBridge : RpcBridge {
         io.github.aoguai.sesameag.hook.ApplicationHookConstants
             .getOfflineCooldownMs()
 
+    // 公共失败退避：使用显式基础间隔或默认随机抖动，随错误数/尝试次数增长，最多十五秒，避免错误后连续重试。
     private fun computeRetryDelayMs(
         retryInterval: Int,
         attempt: Int,
@@ -345,17 +348,8 @@ class AriverRpcBridge : RpcBridge {
         val identity = rpcEntity.requestIdentity ?: RpcDailyCircuit.captureIdentity().also {
             rpcEntity.requestIdentity = it
         }
-        if (!RpcDailyCircuit.isCurrent(identity)) {
+        if (!RpcDailyCircuit.isSameSession(identity)) {
             rpcEntity.settingsRefresh?.failed = true
-            return null
-        }
-        if (rpcEntity.settingsRefresh == null && RpcDailyCircuit.isBlockedToday(identity.userId, rpcEntity.requestMethod)) {
-            rpcEntity.setResponseObject(null, RpcFallbackJsonFactory.buildDailyRiskStop(rpcEntity.requestMethod))
-            rpcEntity.setError()
-            return rpcEntity
-        }
-        if (!WorkflowRootGuard.isExecutionAllowed()) {
-            Log.record(TAG, "必需权限或使用协议未就绪，已拒绝 RPC 请求")
             return null
         }
         // 方法开始时，将成员变量赋值给局部变量，以避免在方法执行期间因其他线程的unload()调用而导致成员变量变为null
@@ -420,6 +414,10 @@ class AriverRpcBridge : RpcBridge {
             var count = 0
             requestLoop@ do {
                 count++
+                rpcEntity.hasResult = false
+                rpcEntity.hasError = false
+                rpcEntity.responseObject = null
+                rpcEntity.responseString = null
                 try {
                     val requestMethod =
                         rpcEntity.requestMethod ?: run {
@@ -438,25 +436,34 @@ class AriverRpcBridge : RpcBridge {
                             count,
                         )
                     }
-                    RpcIntervalLimit.enterIntervalLimit(requestMethod)
-                    if (!RpcDailyCircuit.isCurrent(identity)) {
+                    val parsedRequest = localParseObjectMethod.invoke(null, rpcEntity.rpcFullRequestData)
+                    val sent = RpcIntervalLimit.dispatch(requestMethod) {
+                    if (!RpcDailyCircuit.isSameSession(identity)) {
                         rpcEntity.settingsRefresh?.failed = true
-                        return null
+                        return@dispatch false
                     }
                     if (rpcEntity.settingsRefresh == null && RpcDailyCircuit.isBlockedToday(identity.userId, requestMethod)) {
                         captureNote = "blocked_by_daily_risk_stop"
                         rpcEntity.setResponseObject(null, RpcFallbackJsonFactory.buildDailyRiskStop(requestMethod))
                         rpcEntity.setError()
-                        return rpcEntity
+                        return@dispatch false
                     }
                     if (io.github.aoguai.sesameag.hook.ApplicationHookConstants.shouldBlockRpc()) {
                         rpcEntity.settingsRefresh?.failed = true
                         captureNote = "blocked_by_offline"
-                        return null
+                        return@dispatch false
                     }
                     if (!WorkflowRootGuard.isExecutionAllowed()) {
+                        Log.record(TAG, "必需权限或使用协议未就绪，已拒绝 RPC 请求")
+                        rpcEntity.settingsRefresh?.failed = true
                         captureNote = "blocked_by_execution_prerequisites"
-                        return null
+                        return@dispatch false
+                    }
+                    // 权限查询跨进程返回后，仍须确认请求没有跨账号或被取消。
+                    if (!RpcDailyCircuit.isSameSession(identity) ||
+                        io.github.aoguai.sesameag.hook.ApplicationHookConstants.shouldBlockRpc()) {
+                        rpcEntity.settingsRefresh?.failed = true
+                        return@dispatch false
                     }
                     val finalLocalBridgeCallbackClazzArray = localBridgeCallbackClazzArray
                     rpcEntity.settingsRefresh?.recordMethod(requestMethod)
@@ -466,7 +473,7 @@ class AriverRpcBridge : RpcBridge {
                         false,
                         false,
                         "json",
-                        localParseObjectMethod.invoke(null, rpcEntity.rpcFullRequestData),
+                        parsedRequest,
                         "",
                         null,
                         true,
@@ -504,6 +511,7 @@ class AriverRpcBridge : RpcBridge {
                                                     callMethod(obj, "toJSONString") as String
                                                 } catch (e: Exception) {
                                                     try {
+                                                        // 宿主响应序列化失败时只保留一次 100ms 本地重试缓冲，仍失败则交给外层 RPC 失败处理。
                                                         GlobalThreadPools.sleepCompat(100L)
                                                         callMethod(obj, "toJSONString") as String
                                                     } catch (retryException: Exception) {
@@ -577,11 +585,15 @@ class AriverRpcBridge : RpcBridge {
                             }
                         },
                     )
+                    true
+                    }
+                    if (!sent) return if (captureNote == "blocked_by_daily_risk_stop") rpcEntity else null
 
                     if (!rpcEntity.hasResult) {
                         rpcEntity.settingsRefresh?.failed = true
                         logNullResponse(rpcEntity, "无响应结果", count)
                         if (count < normalizedTryCount) {
+                            // RPC 未返回结果时采用公共指数退避，避免无响应情况下立即连发。
                             CoroutineUtils.sleepCompat(computeRetryDelayMs(retryInterval, count))
                             continue@requestLoop
                         }
@@ -608,7 +620,32 @@ class AriverRpcBridge : RpcBridge {
                         return rpcEntity
                     }
 
-                    if (!rpcEntity.hasError) {
+                    val responseCode = rawResponse.optString("resultCode")
+                    val businessResult = when (rpcEntity.requestMethod) {
+                        "alipay.antocean.ocean.h5.giveFriendPiece" -> when (responseCode) {
+                            "PIECE_HAVE_GAVE" -> "TERMINAL_DONE"
+                            "RECEIVE_PIECE_LIMIT" -> "BUSINESS_LIMIT"
+                            else -> null
+                        }
+                        "alipay.antocean.ocean.h5.cleanFriendOcean" ->
+                            if (responseCode == "HELP_CLEAN_ALL_FRIEND_LIMIT") "BUSINESS_LIMIT" else null
+                        else -> null
+                    }
+                    if (businessResult != null && rawResponse.opt("success") == false) {
+                        maxErrorCount.set(0)
+                        rpcEntity.setError()
+                        Log.error(
+                            TAG,
+                            "RPC业务状态 classification=$businessResult method=${rpcEntity.requestMethod} " +
+                                "code=$responseCode raw=$rawResponse",
+                        )
+                        captureSucceeded = true
+                        return rpcEntity
+                    }
+                    val explicitRetryable = rawResponse.opt("retryable") as? Boolean
+                        ?: rawResponse.opt("retriable") as? Boolean
+                    val explicitFailure = rawResponse.opt("success") == false || rawResponse.opt("isSuccess") == false
+                    if (!rpcEntity.hasError && !(explicitRetryable != null && explicitFailure)) {
                         maxErrorCount.set(0)
                         captureSucceeded = true
                         return rpcEntity
@@ -642,6 +679,16 @@ class AriverRpcBridge : RpcBridge {
                             )
                         }
 
+                        if (explicitRetryable != null) {
+                            rpcEntity.setError()
+                            Log.error(TAG, "RPC业务失败 method=$methodName retryable=$explicitRetryable raw=$response")
+                            if (explicitRetryable && count < normalizedTryCount) {
+                                // 仅在响应明确允许重试且次数未耗尽时退避，给可恢复的业务失败留出恢复窗口。
+                                CoroutineUtils.sleepCompat(computeRetryDelayMs(retryInterval, count))
+                                continue@requestLoop
+                            }
+                            return rpcEntity
+                        }
                         if (isRetryableRpcError(errorCode, errorMessage)) {
                             val currentErrorCount = maxErrorCount.incrementAndGet()
                             if (!io.github.aoguai.sesameag.hook.ApplicationHookConstants.offline) {
@@ -680,6 +727,7 @@ class AriverRpcBridge : RpcBridge {
 
                             logNullResponse(rpcEntity, "网络错误: $errorCode/$errorMessage", count)
                             if (count < normalizedTryCount) {
+                                // 网络类错误采用公共退避，避免故障期间连续重发请求。
                                 CoroutineUtils.sleepCompat(computeRetryDelayMs(retryInterval, count))
                                 continue@requestLoop
                             }
@@ -687,6 +735,11 @@ class AriverRpcBridge : RpcBridge {
                         }
                         captureSucceeded = true
                         return rpcEntity
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw e
                     } catch (e: Exception) {
                         Log.error(
                             TAG,
@@ -697,11 +750,17 @@ class AriverRpcBridge : RpcBridge {
                     }
 
                     if (count < normalizedTryCount) {
+                        // 响应解析异常后按公共重试策略等待，再重新请求，而非对成功响应加延迟。
                         CoroutineUtils.sleepCompat(computeRetryDelayMs(retryInterval, count))
                     }
                 } catch (t: Throwable) {
                     rpcEntity.settingsRefresh?.failed = true
                     if (hardBlocked) return rpcEntity
+                    if (t is CancellationException) throw t
+                    if (t is InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw t
+                    }
                     Log.error(
                         TAG,
                         "rpc request | id: ${rpcEntity.hashCode()} | method: ${rpcEntity.requestMethod} err:",
@@ -710,6 +769,7 @@ class AriverRpcBridge : RpcBridge {
                     captureNote = "request_exception:${t.javaClass.simpleName}"
 
                     if (count < normalizedTryCount) {
+                        // 请求抛出异常后保留公共退避；取消和线程中断已在上方直接退出。
                         CoroutineUtils.sleepCompat(computeRetryDelayMs(retryInterval, count))
                     }
                 }
@@ -771,37 +831,18 @@ class AriverRpcBridge : RpcBridge {
     ) {
         val key = "$methodName|$errorCode"
         val now = System.currentTimeMillis()
-        val stat =
-            errorSummaryWindowStats.computeIfAbsent(key) {
-                ErrorSummaryWindowStat(windowStartMs = now, count = 0)
-            }
-
-        var summaryLog: String? = null
-        var shouldLogDetail = false
-        synchronized(stat) {
-            if (now - stat.windowStartMs >= errorSummaryWindowMs) {
-                summaryLog =
-                    buildString {
-                        append("RPC错误汇总 | 方法: ")
-                        append(methodName)
-                        append(" | 错误: ")
-                        append(errorCode)
-                        append("/")
-                        append(errorMessage)
-                        append(" | 次数: ")
-                        append(stat.count)
-                        append(" | 窗口: ")
-                        append(errorSummaryWindowMs)
-                        append("ms")
-                    }
-                stat.windowStartMs = now
-                stat.count = 0
-                shouldLogDetail = true
-            } else if (stat.count == 0) {
-                shouldLogDetail = true
-            }
-            stat.count++
+        val stat = errorSummaryWindowStats.computeIfAbsent(key) {
+            AtomicReference(ErrorSummaryWindowStat(windowStartMs = now, count = 0))
+        }.getAndUpdate { previous ->
+            if (now - previous.windowStartMs >= errorSummaryWindowMs) {
+                ErrorSummaryWindowStat(now, 1)
+            } else previous.copy(count = previous.count + 1)
         }
+        val expired = now - stat.windowStartMs >= errorSummaryWindowMs
+        val shouldLogDetail = expired || stat.count == 0
+        val summaryLog = if (expired) {
+            "RPC错误汇总 | 方法: $methodName | 错误: $errorCode/$errorMessage | 次数: ${stat.count} | 窗口: ${errorSummaryWindowMs}ms"
+        } else null
         summaryLog?.let { Log.error(TAG, it) }
         if (shouldLogDetail) {
             Log.error(TAG, "RPC错误 | 方法: $methodName | 错误: $errorCode/$errorMessage")
