@@ -12,7 +12,6 @@ import io.github.aoguai.sesameag.model.modelFieldExt.TimeWindowListModelField
 import io.github.aoguai.sesameag.task.antStall.AntStall
 import io.github.aoguai.sesameag.task.greenFinance.GreenFinance
 import io.github.aoguai.sesameag.task.myBankWelfare.MyBankWelfare
-import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.maps.BeachMap
 import io.github.aoguai.sesameag.util.maps.IdMapManager
