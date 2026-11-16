@@ -30,6 +30,7 @@ import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.task.antOrchard.UrlUtil
 import io.github.aoguai.sesameag.task.common.DeferredReason
 import io.github.aoguai.sesameag.task.common.GameCenterPlayRpcCall
+import io.github.aoguai.sesameag.task.common.NonDurationGameTask
 import io.github.aoguai.sesameag.task.common.TaskFlowAction
 import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
 import io.github.aoguai.sesameag.task.common.TaskFlowAdapter
@@ -140,7 +141,6 @@ class AntStall : ModelTask() {
     private val loggedTaskMessages = LinkedHashSet<String>()
     private val reservedInviteShopUserIds = ConcurrentHashMap.newKeySet<String>()
     private val stallWorkflowQueue = SerialTaskQueue()
-    private var stallTasksDoneInvalidatedThisRun = false
 
     override fun getName(): String = "新村"
 
@@ -291,9 +291,9 @@ class AntStall : ModelTask() {
             "SH" -> runCloseShopPersistentTask(childId, payload)
             "TASK" -> {
                 if (stallAutoTask.value != true) return TaskExecutionOutcome.SKIPPED
-                markStallTasksDoneInvalidated()
+                if (Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)) return TaskExecutionOutcome.SKIPPED
                 loggedTaskMessages.clear()
-                if (taskList(skipIfHandledToday = false)) {
+                if (taskList()) {
                     TaskExecutionOutcome.SUCCESS
                 } else {
                     TaskExecutionOutcome.DEFERRED
@@ -517,7 +517,6 @@ class AntStall : ModelTask() {
         try {
             val tc = TimeCounter(TAG)
             Log.stall("执行开始-${getName()}")
-            stallTasksDoneInvalidatedThisRun = false
 
             val homeResponse = AntStallRpcCall.home()
             val homeJson = JSONObject(homeResponse)
@@ -575,9 +574,7 @@ class AntStall : ModelTask() {
             // 自动任务
             if (stallAutoTask.value == true) {
                 loggedTaskMessages.clear()
-                val taskHandledToday =
-                    Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE) &&
-                        !stallTasksDoneInvalidatedThisRun
+                val taskHandledToday = Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)
                 if (!taskHandledToday) {
                     taskList(
                         allowMarkDone = true,
@@ -589,35 +586,20 @@ class AntStall : ModelTask() {
 
             // 新村助力
             if (stallAssistFriend.value == true) {
-                if (assistFriend()) {
-                    markStallTasksDoneInvalidated()
-                }
+                assistFriend()
                 tc.countDebug("新村助力")
             }
 
             // 自动捐赠
             if (stallDonate.value == true && Status.canStallDonateToday()) {
-                if (donate()) {
-                    markStallTasksDoneInvalidated()
-                }
+                donate()
                 tc.countDebug("自动捐赠")
             }
 
             // 进入下一村
             if (roadmap.value == true) {
-                if (roadmap()) {
-                    markStallTasksDoneInvalidated()
-                }
+                roadmap()
                 tc.countDebug("自动进入下一村")
-            }
-
-            if (stallAutoTask.value == true && stallTasksDoneInvalidatedThisRun) {
-                taskList(
-                    skipIfHandledToday = false,
-                    allowMarkDone = true,
-                    executionState = taskFlowExecutionState,
-                )
-                tc.countDebug("自动任务最终刷新")
             }
 
             // 贴罚单
@@ -1444,12 +1426,11 @@ class AntStall : ModelTask() {
      * @brief 处理任务列表
      */
     private fun taskList(
-        skipIfHandledToday: Boolean = true,
         allowMarkDone: Boolean = true,
         executionState: TaskFlowExecutionState = TaskFlowExecutionState(),
     ): Boolean {
         try {
-            val adapter = StallTaskFlowAdapter(skipIfHandledToday)
+            val adapter = StallTaskFlowAdapter()
             val result =
                 TaskFlowEngine(
                     adapter = adapter,
@@ -1458,7 +1439,6 @@ class AntStall : ModelTask() {
                 ).run()
             if (allowMarkDone && result.completed && !result.stopped && adapter.canMarkTasksDone()) {
                 Status.setFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)
-                stallTasksDoneInvalidatedThisRun = false
                 return true
             }
         } catch (t: Throwable) {
@@ -1527,9 +1507,7 @@ class AntStall : ModelTask() {
         return items
     }
 
-    private inner class StallTaskFlowAdapter(
-        private val skipIfHandledToday: Boolean,
-    ) : TaskFlowAdapter {
+    private inner class StallTaskFlowAdapter : TaskFlowAdapter {
         private var querySucceeded = false
         private var latestItems: List<TaskFlowItem> = emptyList()
         private var unknownPhaseSeen = false
@@ -1539,9 +1517,7 @@ class AntStall : ModelTask() {
         override val flowName: String = "新村任务"
 
         override fun isFlowHandledToday(): Boolean =
-            skipIfHandledToday &&
-                Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE) &&
-                !stallTasksDoneInvalidatedThisRun
+            Status.hasFlagToday(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)
 
         override fun query(): JSONObject {
             val response = AntStallRpcCall.taskList()
@@ -1626,26 +1602,10 @@ class AntStall : ModelTask() {
                         StallTaskCompleteRoute.BUSINESS_ACTION -> {
                             val decision = GameCenterPlayRpcCall.resolveTaskAction(item.raw)
                             if (decision.action == GameCenterPlayRpcCall.TaskAction.LEGACY_EXTERNAL_REPORT) {
-                                val game = requireNotNull(decision.mappedTask)
-                                val report = kotlinx.coroutines.runBlocking {
-                                    game.reportDetailed(
-                                        1,
-                                        actionFinishChannel = GameCenterPlayRpcCall.describeTask(item.raw).urlParameters["channel"]
-                                            ?.takeIf { it.isNotBlank() } ?: game.channel,
-                                        includeSafetyReport = false,
-                                    ) { Log.stall(it) }
+                                kotlinx.coroutines.runBlocking {
+                                    NonDurationGameTask.advance(requireNotNull(decision.mappedTask), item.raw,
+                                        detail = stallTaskActionDetail(item, "gameReport"), logger = Log::stall)
                                 }
-                                if (!report.completed) TaskFlowActionResult.failure(
-                                    failureType = TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW,
-                                    message = report.failureMessage,
-                                    rpc = "GameTask.reportDetailed",
-                                    detail = stallTaskActionDetail(item, "gameReport"),
-                                    continueCurrentRoundOnFailure = true,
-                                ) else TaskFlowActionResult.defer(
-                                    DeferredReason.STATE_CONFIRMATION,
-                                    message = "游戏业务已上报，回查新村任务进度",
-                                    refreshAfterAction = true,
-                                )
                             } else {
                                 finishTask(item)
                             }
@@ -2173,7 +2133,7 @@ class AntStall : ModelTask() {
                 detail = stallTaskActionDetail(item, "finishTask"),
             )
             if (failure.code == "400000040") {
-                AntFarmRpcCall.doSceneTask(item.type, "ANTSTALL_TASK", failure) { fallback ->
+                AntFarmRpcCall.doSceneTask(item.type, "ANTSTALL_TASK", failure, sceneCode = "ANTSTALL_TASK", source = "AST") { fallback ->
                     stallTaskActionFailureResult(fallback, "AntFarmRpcCall.doFarmTask", stallTaskActionDetail(item, "finishTask"))
                 }
             } else failure
@@ -3042,11 +3002,6 @@ class AntStall : ModelTask() {
             Log.printStackTrace(TAG, "roadmap err:", t)
         }
         return false
-    }
-
-    private fun markStallTasksDoneInvalidated() {
-        stallTasksDoneInvalidatedThisRun = true
-        Status.removeFlag(StatusFlags.FLAG_ANTSTALL_TASKS_DONE)
     }
 
     private fun queryStallHomeOrNull(action: String): JSONObject? {

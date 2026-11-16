@@ -1,6 +1,7 @@
 package io.github.aoguai.sesameag.task.antFarm
 
 import io.github.aoguai.sesameag.data.Status
+import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.hook.AccountSessionCoordinator
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
 import io.github.aoguai.sesameag.task.antFarm.AntFarm.Companion.TAG
@@ -122,6 +123,7 @@ private fun parseLoveChickenActivity(response: JSONObject): LoveChickenActivityS
 }
 
 private fun AntFarm.queryLoveChickenActivity(): JSONObject? {
+    if (Status.hasFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_UNAVAILABLE)) return null
     val owner = AccountSessionCoordinator.currentUserId().orEmpty()
     val epoch = AccountSessionCoordinator.currentSessionEpoch()
     val response = JSONObject(AntFarmRpcCall.enterDonationCompetitionRank())
@@ -132,7 +134,8 @@ private fun AntFarm.queryLoveChickenActivity(): JSONObject? {
             return null
         }
         "DONATION_COMPETITION02" -> {
-            Log.error(TAG, "爱心鸡结号功能未开启，结束本次续调 rpc=enterDonationCompetitionRank classification=BUSINESS_LIMIT raw=$response")
+            Status.setFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_UNAVAILABLE, expectedUserId = owner)
+            Log.error(TAG, "爱心鸡结号功能未开启，今日停止该入口 rpc=enterDonationCompetitionRank classification=BUSINESS_LIMIT raw=$response")
             return null
         }
     }
@@ -185,7 +188,16 @@ private class LoveChickenExecution(private val snapshot: LoveChickenActivitySnap
     }
 
     fun isBlocked(action: String): Boolean {
+        val dailyStopKey = StatusFlags.FLAG_FARM_LOVE_CHICKEN_DAILY_STOP_PREFIX +
+            "${snapshot.activityId}::${snapshot.endTimeMs}::$action"
+        if (Status.hasFlagToday(dailyStopKey)) {
+            val nextDay = ZonedDateTime.now(FARM_ZONE).toLocalDate().plusDays(1)
+                .atStartOfDay(FARM_ZONE).toInstant().toEpochMilli()
+            retryAt = minOf(retryAt ?: nextDay, nextDay)
+            return true
+        }
         val failure = failures.optJSONObject(action) ?: return false
+        if (!failure.has("until")) return false
         if (System.currentTimeMillis() >= snapshot.finalSettlementMs &&
             ((action == "listCompetitionTask" && failure.optString("code") == "DONATION_COMPETITION04") ||
                 (action == "enterCompetitionAwardPage" && failure.optString("code") == "DONATION_COMPETITION01"))) {
@@ -213,9 +225,21 @@ private class LoveChickenExecution(private val snapshot: LoveChickenActivitySnap
             TaskRpcFailureType.TERMINAL_DONE -> nextDay
             else -> now + LOVE_CHICKEN_RETRY_MS
         }
-        failures.put(action, JSONObject().put("until", until).put("rpc", result.rpc)
+        // 结算阶段切换可解除的限制仍按活动条件处理，不扩大为整日停止。
+        val dailyStop = result.deferredUntil == null &&
+            result.failureType in setOf(TaskRpcFailureType.BUSINESS_LIMIT, TaskRpcFailureType.TERMINAL_DONE) &&
+            !(action == "listCompetitionTask" && result.code == "DONATION_COMPETITION04") &&
+            !(action == "enterCompetitionAwardPage" && result.code == "DONATION_COMPETITION01")
+        val failure = JSONObject().put("rpc", result.rpc)
             .put("classification", result.failureType?.name).put("code", result.code)
-            .put("message", result.message).put("raw", result.raw))
+            .put("message", result.message).put("raw", result.raw)
+        if (dailyStop) {
+            Status.setFlagToday(StatusFlags.FLAG_FARM_LOVE_CHICKEN_DAILY_STOP_PREFIX +
+                "${snapshot.activityId}::${snapshot.endTimeMs}::$action", expectedUserId = owner)
+        } else {
+            failure.put("until", until)
+        }
+        failures.put(action, failure)
         if (until != Long.MAX_VALUE) retryAt = minOf(retryAt ?: until, until)
         if (stopTarget) stopped = true
         Log.error(TAG, "爱心鸡结号动作停止[$action] classification=${result.failureType} rpc=${result.rpc} " +
@@ -736,6 +760,10 @@ internal suspend fun AntFarm.runLoveChickenGatheringWorkflow(initialResponse: JS
     var schedule = true
     var retryAt: Long? = null
     try {
+        if (Status.hasFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_UNAVAILABLE)) {
+            schedule = false
+            return false
+        }
         var response = initialResponse ?: queryLoveChickenActivity()
         if (response == null) { schedule = false; return false }
         snapshot = parseLoveChickenActivity(response)

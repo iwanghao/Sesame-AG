@@ -1674,6 +1674,17 @@ object AntMemberRpcCall {
         }
 
     @JvmStatic
+    fun goldTicketTriggerBigPrize(): String? =
+        try {
+            RequestManager.requestString(
+                "com.alipay.wealthgoldtwa.needle.task.triggerBigPrize",
+                "[null]",
+            )
+        } catch (e: Exception) {
+            null
+        }
+
+    @JvmStatic
     fun queryWelfareHome(): String? =
         try {
             val args =
@@ -1752,6 +1763,17 @@ object AntMemberRpcCall {
             RequestManager.requestString(
                 "com.alipay.wealthgoldtwa.needle.consume.submit",
                 JSONArray().put(args).toString(),
+            )
+        } catch (e: Exception) {
+            null
+        }
+
+    @JvmStatic
+    fun queryConsumeResult(writeOffNo: String): String? =
+        try {
+            RequestManager.requestString(
+                "com.alipay.wealthgoldtwa.goldbill.v4.consume.result",
+                JSONArray().put(JSONObject().put("writeOffNo", writeOffNo)).toString(),
             )
         } catch (e: Exception) {
             null

@@ -5,9 +5,12 @@ import io.github.aoguai.sesameag.task.antFarm.AntFarmRpcCall
 
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
+import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.rpc.RpcDailyCircuit
 import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.task.common.DeferredReason
 import io.github.aoguai.sesameag.task.common.GameCenterPlayRpcCall
+import io.github.aoguai.sesameag.task.common.NonDurationGameTask
 import io.github.aoguai.sesameag.task.common.TaskFlowAction
 import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
 import io.github.aoguai.sesameag.task.common.TaskFlowAdapter
@@ -16,6 +19,7 @@ import io.github.aoguai.sesameag.task.common.TaskFlowItem
 import io.github.aoguai.sesameag.task.common.TaskFlowPhase
 import io.github.aoguai.sesameag.task.common.TaskFlowSnapshot
 import io.github.aoguai.sesameag.task.common.TaskRpcFailureType
+import io.github.aoguai.sesameag.util.GameTask
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.util.TaskBlacklist
@@ -193,21 +197,8 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
     private fun processScene(s: Scene) =
         runCatching {
             if (Status.hasFlagToday(s.flag)) {
-                when (inspectSceneState(s).check) {
-                    CompletionFlagCheck.NO_ACTIONABLE -> {
-                        Log.forest("⏭️ ${s.name} 当前无可执行任务且无抽奖次数，跳过")
-                        return@runCatching
-                    }
-
-                    CompletionFlagCheck.UNKNOWN -> {
-                        Log.forest("⏭️ ${s.name} 完成标记复核失败，保留后续重试机会")
-                        return@runCatching
-                    }
-
-                    CompletionFlagCheck.ACTIONABLE -> {
-                        Status.removeFlag(s.flag)
-                    }
-                }
+                Log.forest("⏭️ ${s.name} 今日已完成，跳过")
+                return@runCatching
             }
 
             Log.forest("👉 开始处理: ${s.name}")
@@ -241,7 +232,6 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                 if (stateBefore.check == CompletionFlagCheck.ACTIONABLE &&
                     !seenStateFingerprints.add(stateBefore.fingerprint)
                 ) {
-                    Status.removeFlag(s.flag)
                     Log.forest("${s.name} 抽抽乐状态未收敛，停止重复请求并保留后续重试")
                     return@runCatching
                 }
@@ -259,7 +249,6 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                     }
 
                 if (!lotteryHandled) {
-                    Status.removeFlag(s.flag)
                     Log.forest("${s.name} 抽奖闭环未完成，保留后续重试")
                     return@runCatching
                 }
@@ -272,14 +261,12 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                     }
 
                     CompletionFlagCheck.UNKNOWN -> {
-                        Status.removeFlag(s.flag)
                         Log.forest("${s.name} 抽奖后状态复核失败，保留后续重试")
                         return@runCatching
                     }
 
                     CompletionFlagCheck.ACTIONABLE -> {
                         if (sceneState.fingerprint in seenStateFingerprints) {
-                            Status.removeFlag(s.flag)
                             Log.forest("${s.name} 抽抽乐状态未收敛，停止重复请求并保留后续重试")
                             return@runCatching
                         }
@@ -423,6 +410,7 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
      * 执行抽奖逻辑
      */
     private fun processLottery(s: Scene): Boolean {
+        val identity = RpcDailyCircuit.captureIdentity()
         val currentUid =
             UserMap.currentUid ?: run {
                 Log.error(TAG, "${s.name} 抽奖跳过: 当前会话 UID 缺失")
@@ -453,6 +441,8 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
 
         if (batchDrawEnabled) {
             while (balance > 0) {
+                if (Thread.currentThread().isInterrupted) throw InterruptedException("森林批量抽奖已中断")
+                if (ApplicationHookConstants.isOffline() || !RpcDailyCircuit.isCurrent(identity)) return false
                 val times = minOf(balance, 10)
                 val batchResp = AntForestRpcCall.batchDrawopengreen(s.id, s.code, SOURCE, times, currentUid).toJson()
                 if (batchResp == null) {
@@ -477,7 +467,9 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
         } else {
             var retry = 0
             // 未声明批量能力的场景保留既有逐次抽奖闭环。
-            while (balance > 0 && retry < 50) {
+            while (balance > 0) {
+                if (Thread.currentThread().isInterrupted) throw InterruptedException("森林单次抽奖已中断")
+                if (ApplicationHookConstants.isOffline() || !RpcDailyCircuit.isCurrent(identity)) return false
                 retry++
                 Log.forest("${s.name} 第 $retry 次抽奖")
 
@@ -491,10 +483,15 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                     return false
                 }
 
-                balance = drawBalance(drawResp) ?: run {
+                val remainingBalance = drawBalance(drawResp) ?: run {
                     Log.error(TAG, "${s.name} 单次抽奖响应缺少 drawAsset.blance")
                     return false
                 }
+                if (remainingBalance >= balance) {
+                    Log.error(TAG, "${s.name} 单次抽奖余额未减少，停止重复提交: $drawResp")
+                    return false
+                }
+                balance = remainingBalance
                 val prize = drawResp.optJSONObject("prizeVO")
                 if (prize != null) {
                     val name = prize.optString("prizeName", "未知奖品")
@@ -502,10 +499,6 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                     Log.forest("${s.name} 🎁 [获得: $name * $num] 剩余次数: $balance")
                 }
 
-            }
-            if (balance > 0) {
-                Log.error(TAG, "${s.name} 单次抽奖达到轮次上限，剩余次数: $balance")
-                return false
             }
         }
 
@@ -557,6 +550,7 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
     ) : TaskFlowAdapter {
         override val moduleName: String = FOREST_BLACKLIST_MODULE
         override val flowName: String = scene.name
+        override val nonRetryableActionFlagPrefix: String = StatusFlags.FLAG_ANTFOREST_CHOUCHOULE_ACTION_STOP_PREFIX
         override val continueCurrentRoundOnRetryableFailure: Boolean = true
 
         override fun query(): JSONObject = fetchFreshTaskList(scene) ?: JSONObject().put("success", false).put("message", "任务列表返回空")
@@ -645,16 +639,16 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
             }
             val descriptor = GameCenterPlayRpcCall.describeTask(taskBaseInfo, taskBizInfo(item), taskProdPlayParam(item))
             val playContract = forestGamePlayContract(item)
-            val mappedTask = descriptor.mappedTask
-            if (!isExchangeDrawTask(item) && playContract == null && mappedTask != null) {
-                if (!kotlinx.coroutines.runBlocking { mappedTask.report(1) }) {
-                    return TaskFlowActionResult.failure(
-                        failureType = TaskRpcFailureType.RETRYABLE_RPC,
-                        message = "已有游戏业务动作未完成",
-                        rpc = "GameTask.report",
-                        detail = actionDetail(item, TaskFlowAction.COMPLETE),
-                        continueCurrentRoundOnFailure = true,
-                    )
+            val decision = GameCenterPlayRpcCall.resolveTaskAction(taskBaseInfo, taskBizInfo(item), taskProdPlayParam(item))
+            if (!isExchangeDrawTask(item) && playContract == null) {
+                if (decision.action == GameCenterPlayRpcCall.TaskAction.LEGACY_EXTERNAL_REPORT) {
+                    return kotlinx.coroutines.runBlocking {
+                        NonDurationGameTask.advance(requireNotNull(decision.mappedTask), taskBaseInfo, taskBizInfo(item), taskProdPlayParam(item),
+                            channel = GameTask.Forest_slxcc.channel,
+                            detail = actionDetail(item, TaskFlowAction.COMPLETE), logger = Log::forest)
+                    }
+                } else if (descriptor.isGameTask && decision.action == GameCenterPlayRpcCall.TaskAction.DEFERRED) {
+                    return TaskFlowActionResult.defer(DeferredReason.PREREQUISITE_PENDING, decision.reason)
                 }
             }
             playContract?.let { contract ->
@@ -707,11 +701,12 @@ class ForestChouChouLe(private val charityWaterEnabled: Boolean = false) {
                         "AntForestRpcCall.finishTaskopengreen"
                     },
             )
-            return if (!exchangeDrawTask && actionResult.code == "400000040" && item.sceneCode.isNotBlank()) {
-                AntFarmRpcCall.doSceneTask(item.type, item.sceneCode, actionResult) { fallback ->
+            val completedAction = if (!exchangeDrawTask && actionResult.code == "400000040" && item.sceneCode.isNotBlank()) {
+                AntFarmRpcCall.doSceneTask(item.type, item.sceneCode, actionResult, sceneCode = item.sceneCode, source = "ADBASICLIB") { fallback ->
                     handleActionResponse(item, fallback, TaskFlowAction.COMPLETE, "AntFarmRpcCall.doFarmTask")
                 }
             } else actionResult
+            return completedAction
         }
 
         override fun receive(item: TaskFlowItem): TaskFlowActionResult {

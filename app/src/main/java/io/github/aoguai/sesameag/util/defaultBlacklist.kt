@@ -54,6 +54,7 @@ private val sesameAlchemyDefaultBlacklist =
         "hjwf_zcylt_zhuanhua",
         "hjwf_eduka_renwu",
         "alchemy_check_in_subscribe_task", // joinActivity 返回 PROMISE_TEMPLATE_NOT_EXIST
+        "zm_1Dufr06Z_C902HUcd", // 生活记录 pushActivity 明确拒绝，taskFeedback 后任务仍未完成
         "hjwf_xiangjiangshikaipao_renwu", // 游戏事件不能由pushActivity完成，返回ILLEGAL_ARGUMENT
         "hjwf_zcylt_chongzhi", // 真实充值不能由pushActivity完成，返回ILLEGAL_ARGUMENT
         "hjwf_langmancanting_renwu", // 完成3个订单的游戏事件，pushActivity返回ILLEGAL_ARGUMENT
@@ -83,7 +84,6 @@ private val orchardDefaultBlacklist =
         "ORCHARD_NCLY_ZH_SC33T_fb",
         "ORCHARD_NCLY_CHARGE1_LMCT",
         "ORCHARD_NCLY_GAME_CHARGE0|任意充值得100000肥", // finishTask 返回 400000040，不支持rpc调用
-        "CHOUCHOULE_GAME_WDHYSJ_ZH", // 居民订单不可由普通 finishDrawTask 完成，返回 400000040
         "CHOUCHOULE_GAME_WDHYSJ_CHARGE", // 需真实充值，finishDrawTask 返回 400000040
         "ORCHARD_NORMAL_GAODE_VISIT|去高德发表真实评价", // finishTask 返回 400000040，不支持rpc调用
         "ORCHARD_NORMAL_TAOBAO26_618|去淘金币赢20亿", // 不支持rpc调用，缺少稳定完成RPC闭环
@@ -111,11 +111,6 @@ private val goldenBeanDefaultBlacklist =
         "GOLDEN_BEAN_MASTER_TASK:GOLDEN_BEAN_TASK_XIANSHANGZHIFU", // 线上支付
         "GOLDEN_BEAN_MASTER_TASK:GOLDEN_BEAN_TASK_XIANXIAZHIFU", // 线下支付
         "GOLDEN_BEAN_MASTER_TASK:GOLDEN_BEAN_TASK_YUEBAO", // 余额宝真实业务动作
-        "GOLDEN_BEAN_ZHIMA_LIST:ZHIMA_youxi_dageluosi", // 无可验证的外部游戏完成RPC闭环
-        "GOLDEN_BEAN_ZHIMA_LIST:ZHIMA_youxi_zheguanwohenxing", // 无可验证的外部游戏完成RPC闭环
-        "GOLDEN_BEAN_ZHIMA_LIST:ZHIMA_youxi_hebuguowoba", // 无可验证的外部游戏完成RPC闭环
-        "GOLDEN_BEAN_ZHIMA_LIST:ZHIMA_youxi_wodehuayuanshijie", // 无可验证的外部游戏完成RPC闭环
-        "GOLDEN_BEAN_ZHIMA_LIST:ZHIMA_youxi_qingyunjuezhifumo", // 无可验证的外部游戏完成RPC闭环
     )
 
 private val farmDefaultBlacklist =
@@ -159,7 +154,6 @@ private val forestDefaultBlacklist =
         // 蚂蚁森林
         "GAME_DONE_SGBHSD_new", // 常规招募3次，不能由点击、时长或通用完成代替
         "ANTFOREST_2021004173661702_ST_XR", // 同一招募条件的活力奖励，通用finish明确返回不支持rpc调用
-        "QYJZFM_XS_1", // 闯关3次的活力奖励，finishTaskopengreen返回400000040
         "ENERGY_XUANJIAO_huanbaobei环保杯",
         "ENERGY_XUANJIAO_zhiyinshui直饮水",
         "ENERGY_XUANJIAO_dianzibaodan电子保单",
@@ -180,7 +174,7 @@ private val forestDefaultBlacklist =
         "ENERGY_XUANJIAO_dianzizhangdan电子账单",
         "ENERGY_XUANJIAO_faxianlvseshenhuo探动植物",
         "ENERGY_XUANJIAO_lvsebaozhuang绿色包装",
-        "ENERGY_XUANJIAO_etcjiaofeiETC缴费",
+        "ENERGY_XUANJIAO_etcjiaofei",
         "ENERGY_XUANJIAO_linqishipin临期食品",
         "ENERGY_XUANJIAO_lvsechexian绿色车险",
         "ENERGY_XUANJIAO_lvsewaimai绿色外卖",
@@ -218,7 +212,6 @@ private val forestDefaultBlacklist =
         "CNXDY_TASK_QUDONG", // 玩下蛋鸭击败20只怪：不支持rpc调用
         "FOREST_NORMAL_DRAW_YYDWLXQ_ZH", // finishTaskopengreen 返回 400000040
         "FOREST_ACTIVITY_DRAW_ZHXF_ZHWUFU", // finishTaskopengreen 返回 400000040
-        "WDHYSJ_QDRW_NORMAL",
         "FOREST_ACTIVITY_DRAW_ZCYLT_ZHWUFU",
         "FOREST_ACTIVITY_DRAW_LMCT_ZHWUFU", // finishTaskopengreen 返回 400000040
         "FOREST_NORMAL_DRAW_SHARE", // 森林抽抽乐分享任务
@@ -230,7 +223,6 @@ private val forestDefaultBlacklist =
         "FKSSJ_LJRW_HUOLI", // 水世界捡海面物资5次：不支持rpc调用
         "FKSSJ_LJRWtanxian_HUOLI|玩水世界探险船闯5关", // 不支持rpc调用，缺少稳定完成RPC闭环
         "FKSSJ_LJRWdiaoyu_HUOLI", // 水世界手动钓鱼成功10次：不支持rpc调用
-        "YBLB_TASK_QUDONG", // 玩一步两步通关1次：不支持rpc调用
         "MHXCZ_TASK_QUDONG|梦幻消除战做1个订单", // 不支持rpc调用，缺少稳定完成RPC闭环
         "XJSKP_TASK_QUDONG|玩向僵尸开炮通关1次", // 400000040 不支持rpc调用，缺少稳定完成RPC闭环
         "GYG_AQapp_202511|去蚂蚁阿福揭秘真相", // 不支持rpc调用，缺少稳定完成RPC闭环
@@ -310,7 +302,6 @@ private val memberDefaultBlacklist =
         "玩会员爱解压通过2关",
         "逛一逛一淘APP",
         "玩造化仙府升级建筑3次",
-        "玩浪漫餐厅提交5个订单",
         "玩龙迹之城升级10次英雄",
         "玩螺丝消不停通2关",
         "玩斗罗大陆零击败40只怪物",
@@ -329,16 +320,13 @@ private val memberDefaultBlacklist =
         "SYH_RTB_SHOW_TASK_INDEX_2|去签名设计", // 304/TASK_NOT_FINISHED
         "SYH_RTB_SHOW_TASK_INDEX_3|玩游戏通过1次游戏", // 001，系统异常
         "AP15353904|玩猪了个猪",
-        "2060170000365923#lmct_game_order_every_1#20|玩浪漫餐厅",
         "2021004163668677#wdhysj_game_zhuxian_every_1#12|玩我的世界",
         "2060170000365575#ddxbt_game_pass_every_1#5|玩点点消不停",
-        "2021005139650112#dgls_game_level_every_1#4|玩打个螺丝",
         "2021003184609526#pplwg_game_pass_level_every_1#5|玩泡泡龙王国",
         "JYMJFTE_TASK", // 商家真实业务/外跳任务
         "TJZMZJ_TASK",
         "zzsjxyx|玩主宰世界|通过8关主线关卡",
         "yzsc|玩约战沙城|完成5个日常活动",
-        "yblb2060170000359285|玩一步两步|通过2关",
         "ljzc|玩龙迹之城|击杀6次挑战boss",
         "sjwy|玩四季物语|完成15个订单",
         "zlgz2060170000375112|玩猪了个猪|通过8关",
