@@ -22,13 +22,10 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +38,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Surface
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
 import io.github.aoguai.sesameag.hook.keepalive.PersistentLaunchPolicy
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthItem
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthSnapshot
@@ -169,7 +170,7 @@ private fun PermissionHealthRow(
         else -> "未开启"
     }
     ListItem(
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        colors = ListItemDefaults.colors(containerColor = neumorphicColors.background),
         leadingContent = {
             if (requesting) {
                 DelayedLoadingIndicator(modifier = Modifier.size(24.dp).semantics { stateDescription = "处理中" })

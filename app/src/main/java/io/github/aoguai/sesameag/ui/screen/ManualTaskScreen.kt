@@ -11,13 +11,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import io.github.aoguai.sesameag.ui.compose.neumorphic.NeuDivider
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
 import io.github.aoguai.sesameag.model.Model
 import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.task.customTasks.CustomTask
@@ -63,6 +65,8 @@ fun ManualTaskScreen(
     var exchangeEnergyRainCard by rememberSaveable { mutableStateOf(initialExchangeEnergyRainCard) }
 
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = { Text(title) },
@@ -70,7 +74,8 @@ fun ManualTaskScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = neuTopAppBarColors(),
             )
         }
     ) { paddingValues ->
@@ -113,7 +118,7 @@ fun ManualTaskScreen(
                     exchangeEnergyRainCard = exchangeEnergyRainCard,
                     onExchangeEnergyRainCardChange = { exchangeEnergyRainCard = it }
                 )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = Color.LightGray)
+                NeuDivider()
             }
 
             // 任务模块整体手动触发区
@@ -141,7 +146,7 @@ fun ManualTaskScreen(
                     exchangeEnergyRainCard = exchangeEnergyRainCard,
                     onExchangeEnergyRainCardChange = { exchangeEnergyRainCard = it }
                 )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = Color.LightGray)
+                NeuDivider()
             }
         }
     }

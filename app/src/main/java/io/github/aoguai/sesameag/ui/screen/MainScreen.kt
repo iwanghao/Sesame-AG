@@ -2,11 +2,13 @@ package io.github.aoguai.sesameag.ui.screen
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.Dashboard
@@ -19,10 +21,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
@@ -37,6 +39,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -51,6 +56,7 @@ import io.github.aoguai.sesameag.hook.AccountSlotSnapshot
 import io.github.aoguai.sesameag.task.customTasks.CustomTask
 import io.github.aoguai.sesameag.ui.MainActivity
 import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton as NeuIconButton
 import io.github.aoguai.sesameag.ui.navigation.AppRoute
 import io.github.aoguai.sesameag.ui.navigation.LogSource
 import io.github.aoguai.sesameag.ui.navigation.TopLevelDestination
@@ -61,6 +67,7 @@ import io.github.aoguai.sesameag.ui.screen.content.LogsContent
 import io.github.aoguai.sesameag.ui.screen.content.MoreContent
 import io.github.aoguai.sesameag.ui.screen.components.DelayedLoadingIndicator
 import io.github.aoguai.sesameag.ui.theme.ThemeManager
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
 import io.github.aoguai.sesameag.util.CommandUtil.serviceStatus
 import io.github.aoguai.sesameag.util.Files
@@ -372,38 +379,23 @@ fun MainScreen(
         title = title,
         topBarActions = {
             if (selected == TopLevelDestination.LOGS && isTopLevelRoute) {
-                var expanded by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { expanded = true }) {
-                        Icon(
-                            imageVector = Icons.Outlined.MoreVert,
-                            contentDescription = "更多日志操作",
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "清空所有日志",
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Outlined.DeleteForever,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            },
-                            onClick = {
-                                expanded = false
-                                showClearAllLogsDialog = true
-                            },
-                        )
-                    }
+                TopBarMoreAction {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "清空所有日志",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteForever,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = { showClearAllLogsDialog = true },
+                    )
                 }
             }
         },
@@ -446,7 +438,11 @@ private fun AdaptiveAppShell(
     onSelected: (TopLevelDestination) -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
+    val neu = neumorphicColors
+    // 导航套件的容器色对齐新拟态底板，避免底部导航出现一块独立的深色条
     NavigationSuiteScaffold(
+        containerColor = neu.background,
+        contentColor = neu.content,
         navigationSuiteItems = {
             TopLevelDestination.entries.forEach { destination ->
                 item(
@@ -465,11 +461,28 @@ private fun AdaptiveAppShell(
         },
     ) {
         Scaffold(
+            containerColor = neu.background,
+            contentColor = neu.content,
             topBar = {
                 if (title != null) {
                     CenterAlignedTopAppBar(
-                        title = { Text(title) },
+                        title = {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleLarge,
+                                color = neu.content,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                         actions = topBarActions,
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = neu.background,
+                            scrolledContainerColor = neu.background,
+                            titleContentColor = neu.content,
+                            actionIconContentColor = neu.content,
+                            navigationIconContentColor = neu.content,
+                        ),
                     )
                 }
             },
@@ -477,9 +490,41 @@ private fun AdaptiveAppShell(
             content(
                 Modifier
                     .fillMaxSize()
+                    .background(neu.background)
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding),
             )
+        }
+    }
+}
+
+/**
+ * 顶栏「更多」图标按钮。
+ *
+ * 单独抽出来是为了让它跟页面里的其他控件一样使用新拟态圆钮，
+ * 而不是 M3 默认的水波纹方形图标位。
+ */
+@Composable
+private fun TopBarMoreAction(
+    children: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.padding(end = 8.dp)) {
+        NeuIconButton(
+            onClick = { expanded = true },
+            elevated = true,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.MoreVert,
+                contentDescription = "更多日志操作",
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = neumorphicColors.background,
+        ) {
+            children()
         }
     }
 }

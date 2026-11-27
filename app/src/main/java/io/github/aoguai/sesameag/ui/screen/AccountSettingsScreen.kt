@@ -60,33 +60,25 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Upload
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
+import io.github.aoguai.sesameag.ui.compose.neumorphic.NeuDivider
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.theme.NeumorphicShape
+import io.github.aoguai.sesameag.ui.theme.NeuElevation
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -98,6 +90,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
@@ -105,6 +98,20 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import io.github.aoguai.sesameag.ui.compose.neumorphic.AlertDialog
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neumorphicDialogPlate
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Button
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Checkbox
+import io.github.aoguai.sesameag.ui.compose.neumorphic.FilterChip
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.OutlinedButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.OutlinedTextField
+import io.github.aoguai.sesameag.ui.compose.neumorphic.RadioButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.SmallFloatingActionButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Surface
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Switch
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -308,6 +315,8 @@ fun AccountSettingsScreen(
     }
 
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = {
@@ -400,6 +409,7 @@ fun AccountSettingsScreen(
                         }
                     }
                 },
+                colors = neuTopAppBarColors(),
             )
         },
         floatingActionButton = {
@@ -696,11 +706,13 @@ private fun ModelList(
                         onClick = { onSelectModel(model.code) },
                         onLongClick = { onClearTodayFlags(model.code) },
                     ),
+                    // 选中态用主色极淡染，避免整块 secondaryContainer 实色破坏同色底板
                     colors = androidx.compose.material3.ListItemDefaults.colors(
                         containerColor = if (model.code == selectedModelCode) {
-                            MaterialTheme.colorScheme.secondaryContainer
+                            neumorphicColors.accent.copy(alpha = 0.16f)
+                                .compositeOver(neumorphicColors.background)
                         } else {
-                            MaterialTheme.colorScheme.surface
+                            neumorphicColors.background
                         },
                     ),
                 ) {
@@ -905,7 +917,7 @@ private fun FieldEditor(
                 }
             }
         }
-        HorizontalDivider()
+        NeuDivider()
     }
 }
 
@@ -1093,8 +1105,13 @@ private fun SelectionEditorDialog(
     val options = (optionsState as? FieldOptionsState.Ready)?.options.orEmpty()
     val filtered = options.filter { it.name.contains(search, true) || it.id.contains(search, true) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = true)) {
+        Surface(
+            modifier = Modifier.neumorphicDialogPlate(),
+            shape = NeumorphicShape.xl,
+            color = neumorphicColors.background,
+            elevationSpec = NeuElevation.dialog,
+        ) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -1374,6 +1391,8 @@ private fun FriendSelectionEditorScreen(
 
     BackHandler(onBack = ::requestBack)
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = { Text(field.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -1404,6 +1423,7 @@ private fun FriendSelectionEditorScreen(
                         onSave = ::saveFriendSelection,
                     )
                 },
+                colors = neuTopAppBarColors(),
             )
         },
     ) { padding ->

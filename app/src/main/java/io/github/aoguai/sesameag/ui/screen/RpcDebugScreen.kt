@@ -15,13 +15,13 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.FloatingActionButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.ui.screen.components.RpcDialogHandler
 import io.github.aoguai.sesameag.ui.screen.card.RpcItemCard
@@ -51,6 +53,10 @@ fun RpcDebugScreen(
 
 
     Scaffold(
+
+        containerColor = neumorphicColors.background,
+
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = {
@@ -93,7 +99,8 @@ fun RpcDebugScreen(
                             onClick = { viewModel.loadDefaultItems(); showMenu = false }
                         )
                     }
-                }
+                },
+                colors = neuTopAppBarColors(),
             )
         },
         floatingActionButton = {

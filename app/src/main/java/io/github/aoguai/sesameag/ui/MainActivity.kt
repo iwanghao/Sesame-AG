@@ -44,7 +44,9 @@ import io.github.aoguai.sesameag.ui.permissions.PermissionRequirement
 import io.github.aoguai.sesameag.ui.permissions.PermissionStatus
 import io.github.aoguai.sesameag.ui.screen.MainScreen
 import io.github.aoguai.sesameag.ui.navigation.LogSource
+import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
 import io.github.aoguai.sesameag.ui.theme.AppTheme
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
 import io.github.aoguai.sesameag.ui.theme.ThemeManager
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
 import io.github.aoguai.sesameag.task.customTasks.CustomTask
@@ -301,21 +303,22 @@ class MainActivity : ComponentActivity() {
             // AppTheme 会处理状态栏颜色
             AppTheme(dynamicColor = isDynamicColor) {
                 if (showRestoreConfirmation) {
-                    androidx.compose.material3.AlertDialog(
+                    CommonAlertDialog(
+                        showDialog = true,
                         onDismissRequest = { confirmStorageRestore.value = false },
-                        title = { androidx.compose.material3.Text("恢复完整备份") },
-                        text = { androidx.compose.material3.Text("将关闭目标应用，并用备份替换当前全部模块配置、账号记录和日志。请先完成目标应用中的操作。\n\n选择备份后，请保持本应用在前台，等待恢复完成后再操作。") },
-                        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                        onConfirm = {
                             confirmStorageRestore.value = false
                             restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
-                        }) { androidx.compose.material3.Text("选择备份") } },
-                        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmStorageRestore.value = false }) {
-                            androidx.compose.material3.Text("取消")
-                        } },
+                        },
+                        title = "恢复完整备份",
+                        text = "将关闭目标应用，并用备份替换当前全部模块配置、账号记录和日志。请先完成目标应用中的操作。<br><br>选择备份后，请保持本应用在前台，等待恢复完成后再操作。",
+                        confirmText = "选择备份",
+                        dismissText = "取消",
                     )
                 }
                 if (storageState.ready && storageState.busy) {
-                    androidx.compose.material3.AlertDialog(
+                    // 不可关闭的进度弹窗，同样走新拟态浮板，保持与其它弹窗一致的遮罩与圆角
+                    io.github.aoguai.sesameag.ui.compose.neumorphic.AlertDialog(
                         onDismissRequest = {},
                         title = { androidx.compose.material3.Text(storageState.message) },
                         text = {
@@ -325,6 +328,8 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         confirmButton = {},
+                        containerColor = neumorphicColors.background,
+                        textContentColor = neumorphicColors.content,
                     )
                     return@AppTheme
                 }

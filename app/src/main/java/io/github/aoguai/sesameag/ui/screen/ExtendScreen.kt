@@ -10,17 +10,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +27,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.AlertDialog
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Card
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.OutlinedTextField
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.ui.viewmodel.ExtendDialog
 import io.github.aoguai.sesameag.ui.viewmodel.ExtendViewModel
@@ -49,6 +51,8 @@ fun ExtendScreen(
     }
 
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = { Text("扩展功能") },
@@ -56,7 +60,8 @@ fun ExtendScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
-                }
+                },
+                colors = neuTopAppBarColors(),
             )
         }
     ) { padding ->

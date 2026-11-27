@@ -5,9 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -16,6 +13,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.theme.NeumorphicShape
+import io.github.aoguai.sesameag.ui.compose.neumorphic.FilledTonalButton
 
 
 @Composable
@@ -25,15 +24,11 @@ fun MenuButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    // 日志入口按钮：统一走令牌圆角与主色，避免单独使用 surfaceVariant 造成色块割裂
     FilledTonalButton(
         onClick = onClick,
-        modifier = modifier.height(72.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.primary
-        ),
-        elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 2.dp)
+        modifier = modifier.height(76.dp),
+        shape = NeumorphicShape.l,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,

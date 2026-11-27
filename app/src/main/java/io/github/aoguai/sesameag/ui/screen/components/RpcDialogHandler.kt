@@ -21,17 +21,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ImportExport
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +39,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.theme.NeumorphicShape
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neumorphicDialogPlate
+import io.github.aoguai.sesameag.ui.compose.neumorphic.AlertDialog
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Button
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.OutlinedTextField
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Surface
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Switch
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
 import io.github.aoguai.sesameag.ui.viewmodel.RpcDebugViewModel
 import io.github.aoguai.sesameag.ui.viewmodel.RpcDialogState
 import io.github.aoguai.sesameag.util.Log
@@ -87,10 +90,10 @@ fun RpcDialogHandler(state: RpcDialogState, viewModel: RpcDebugViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .safeDrawingPadding()
-                        .padding(16.dp),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 4.dp
+                        .neumorphicDialogPlate()
+                        .padding(20.dp),
+                    shape = NeumorphicShape.xl,
+                    color = neumorphicColors.background,
                 ) {
                     Column(
                         modifier = Modifier

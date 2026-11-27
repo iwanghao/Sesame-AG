@@ -54,23 +54,20 @@ import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTooltipState
+import io.github.aoguai.sesameag.ui.compose.neumorphic.NeuDivider
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -104,6 +101,10 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.SmallFloatingActionButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Switch
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextField
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
 import io.github.aoguai.sesameag.ui.screen.components.DelayedLoadingIndicator
@@ -206,15 +207,10 @@ fun LogViewerScreen(
     }
 
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    // ✅ 统一使用 Surface (背景) 和 OnSurface (前景)
-                    containerColor = MaterialTheme.colorScheme.background,
-//                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-//                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
-//                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                ),
                 navigationIcon = {
                     TooltipBox(
                         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
@@ -262,14 +258,6 @@ fun LogViewerScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .focusRequester(focusRequester),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    // ✅ 修正光标颜色
-                                    cursorColor = MaterialTheme.colorScheme.onSurface
-                                ),
                                 // ✅ 修正输入文字颜色
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                                     color = MaterialTheme.colorScheme.onSurface
@@ -370,7 +358,7 @@ fun LogViewerScreen(
                                                 )
                                             },
                                         )
-                                        HorizontalDivider()
+                                        NeuDivider()
                                         DropdownMenuItem(
                                             text = { Text("滑动到顶部") },
                                             onClick = {
@@ -388,7 +376,7 @@ fun LogViewerScreen(
                                             },
                                             leadingIcon = { Icon(Icons.Default.VerticalAlignBottom, null) }
                                         )
-                                        HorizontalDivider()
+                                        NeuDivider()
 
                                         // 二级菜单逻辑 ...
                                         var showFontSubMenu by rememberSaveable(filePath) { mutableStateOf(false) }
@@ -413,7 +401,7 @@ fun LogViewerScreen(
                                                     onClick = { viewModel.decreaseFontSize() },
                                                     leadingIcon = { Icon(Icons.Default.Remove, null) }
                                                 )
-                                                HorizontalDivider()
+                                                NeuDivider()
                                                 DropdownMenuItem(
                                                     text = { Text("重置大小") },
                                                     onClick = { viewModel.resetFontSize(); showFontSubMenu = false },
@@ -421,7 +409,7 @@ fun LogViewerScreen(
                                                 )
                                             }
                                         }
-                                        HorizontalDivider()
+                                        NeuDivider()
                                         DropdownMenuItem(
                                             text = { Text("导出文件") },
                                             enabled = !state.isExporting,
@@ -441,7 +429,8 @@ fun LogViewerScreen(
                             }
                         }
                     }
-                }
+                },
+                colors = neuTopAppBarColors(),
             )
         }
     )
@@ -513,8 +502,9 @@ fun LogViewerScreen(
                                 viewModel.toggleAutoScroll(false)
                                 scope.launch { listState.scrollToItem(0) }
                             },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            // 回到顶部是次要操作，用同色凸起，与下方主色「回到底部」形成层级对比
+                            containerColor = neumorphicColors.background,
+                            contentColor = neumorphicColors.content,
                         ) {
                             Icon(Icons.Default.KeyboardArrowUp, "回到顶部")
                         }

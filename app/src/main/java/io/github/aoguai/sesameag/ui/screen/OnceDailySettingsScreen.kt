@@ -20,17 +20,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.compose.neumorphic.neuTopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +40,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Checkbox
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.SmallFloatingActionButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Switch
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
 import io.github.aoguai.sesameag.model.CustomSettings
 import io.github.aoguai.sesameag.model.modelFieldExt.TimeFieldMeta
 import io.github.aoguai.sesameag.ui.screen.components.DelayedLoadingIndicator
@@ -207,6 +209,8 @@ fun OnceDailySettingsScreen(
 
     BackHandler(onBack = ::requestBack)
     Scaffold(
+        containerColor = neumorphicColors.background,
+        contentColor = neumorphicColors.content,
         topBar = {
             TopAppBar(
                 title = {
@@ -232,6 +236,7 @@ fun OnceDailySettingsScreen(
                         onSave = { save() },
                     )
                 },
+                colors = neuTopAppBarColors(),
             )
         },
         floatingActionButton = {

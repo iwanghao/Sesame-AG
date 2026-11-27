@@ -78,7 +78,7 @@ fun HomeContent(
             Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(vertical = 16.dp),
     ) {
         item {

@@ -19,15 +19,11 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import io.github.aoguai.sesameag.ui.compose.neumorphic.NeuDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +35,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
+import io.github.aoguai.sesameag.ui.compose.neumorphic.SunkenSurface
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
+import io.github.aoguai.sesameag.ui.theme.NeumorphicShape
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Card
+import io.github.aoguai.sesameag.ui.compose.neumorphic.IconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.FilledIconButton
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Surface
 import io.github.aoguai.sesameag.entity.RpcDebugEntity
 
 @Composable
@@ -53,8 +59,7 @@ fun RpcItemCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        colors = CardDefaults.cardColors(containerColor = neumorphicColors.background)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -91,9 +96,9 @@ fun RpcItemCard(
                         }
                     }
                 }
-                IconButton(
+                // 运行按钮用主色淡染的新拟态圆钮，保持与其余控件同一材质
+                FilledIconButton(
                     onClick = onRun,
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
                     Icon(Icons.Default.PlayArrow, "运行", tint = MaterialTheme.colorScheme.primary)
                 }
@@ -101,10 +106,14 @@ fun RpcItemCard(
 
             if (item.description.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
-                Surface(
-                    onClick = { descriptionExpanded = !descriptionExpanded },
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                // 内嵌信息块用真正的凹陷，避免在同一张凸起卡片里再叠一层凸起
+                SunkenSurface(
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { descriptionExpanded = !descriptionExpanded },
+                    ),
+                    shape = NeumorphicShape.s,
                 ) {
                     Column(Modifier.fillMaxWidth().padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -146,7 +155,7 @@ fun RpcItemCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            NeuDivider()
 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

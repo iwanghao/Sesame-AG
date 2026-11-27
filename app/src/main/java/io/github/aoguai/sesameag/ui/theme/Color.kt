@@ -74,4 +74,27 @@ val surfaceContainerDark = Color(0xFF1D2022)
 val surfaceContainerHighDark = Color(0xFF282B2D)
 val surfaceContainerHighestDark = Color(0xFF323537)
 
+// ---------------------------------------------------------------------------
+// 新拟态（Neumorphism）专用色板
+//
+// 新拟态依赖「同一底色 + 方向性光影」，因此背景必须是一块几乎无灰阶跳变的柔和浅色，
+// 暗影取同色系偏冷的深灰，高光取接近纯白的暖色，避免出现脏灰或彩边。
+// ---------------------------------------------------------------------------
 
+/** 浅色主题的统一底板色 */
+val NeumorphicBackgroundLight = Color(0xFFE8ECEF)
+
+/** 浅色主题的右下暗影色（冷灰，低饱和） */
+val NeumorphicShadowLight = Color(0xFFA9B3BC)
+
+/** 浅色主题的左上高光色 */
+val NeumorphicLightLight = Color(0xFFFFFFFF)
+
+/** 深色主题的统一底板色 */
+val NeumorphicBackgroundDark = Color(0xFF1F2429)
+
+/** 深色主题的右下暗影色（几乎全黑） */
+val NeumorphicShadowDark = Color(0xFF121619)
+
+/** 深色主题的左上高光色（极淡的冷光） */
+val NeumorphicLightDark = Color(0xFF333A42)

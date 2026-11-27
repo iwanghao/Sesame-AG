@@ -15,16 +15,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.rounded.AccountCircle
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.aoguai.sesameag.ui.compose.neumorphic.AlertDialog
+import io.github.aoguai.sesameag.ui.compose.neumorphic.Surface
+import io.github.aoguai.sesameag.ui.compose.neumorphic.TextButton
+import io.github.aoguai.sesameag.ui.theme.NeumorphicShape
+import io.github.aoguai.sesameag.ui.theme.neumorphicColors
 import io.github.aoguai.sesameag.entity.UserEntity
 
 
@@ -54,15 +56,15 @@ fun UserSelectionDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(userList) { user ->
+                        // 弹窗内部的可点击选项：用浅凹槽而非再次凸起，避免在浮板上叠出高光
                         Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            tonalElevation = 2.dp,
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
                                 onUserSelected(user)
                                 onDismissRequest()
-                            }
+                            },
+                            shape = NeumorphicShape.s,
+                            color = neumorphicColors.background,
                         ) {
                             Row(
                                 modifier = Modifier
